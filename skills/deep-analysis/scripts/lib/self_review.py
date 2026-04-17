@@ -79,12 +79,27 @@ def check_industry_mapping_sanity(ctx: dict) -> list[Issue]:
 
 
 def check_all_dims_exist(ctx: dict) -> list[Issue]:
-    """22 维必须都存在（不能完全缺失 key）"""
+    """应跑的维度必须都存在 · v2.10.4 · profile-aware (lite 只查启用的维度)."""
     issues = []
     dims = ctx["dims"]
-    EXPECTED = [f"{i}_" for i in range(20)] + ["20_valuation_models", "21_research_workflow", "22_deep_methods"]
-    # 只检查前 20 个 fetcher 维度
+
+    # v2.10.4 · 按 profile.fetchers_enabled 决定"应跑"的维度集
+    # lite 模式只跑 7 个维度，未启用的不能报 critical missing
     required_numbered = set(range(20))
+    try:
+        from lib.analysis_profile import get_profile
+        profile = get_profile()
+        # profile.fetchers_enabled 形如 {"0_basic", "1_financials", ...}
+        enabled_nums = {
+            int(k.split("_")[0])
+            for k in profile.fetchers_enabled
+            if k[0].isdigit() and k.split("_")[0].isdigit()
+        }
+        if enabled_nums:
+            required_numbered = enabled_nums
+    except Exception:
+        pass  # profile 加载失败，fallback 到全 20 维
+
     present_nums = {int(k.split("_")[0]) for k in dims if k[0].isdigit() and k.split("_")[0].isdigit()}
     missing = required_numbered - present_nums
     if missing:
@@ -93,7 +108,7 @@ def check_all_dims_exist(ctx: dict) -> list[Issue]:
                 severity="critical",
                 category="data",
                 dim=f"{num}_",
-                issue=f"维度 {num} 完全缺失（fetcher 从未运行或崩溃）",
+                issue=f"应跑的维度 {num} 完全缺失（fetcher 从未运行或崩溃）",
                 evidence=f"dims 里没有 key 以 {num}_ 开头",
                 suggested_fix=f"重跑 run.py <ticker> --no-resume 或手动 fetch_X",
             ))
@@ -101,11 +116,33 @@ def check_all_dims_exist(ctx: dict) -> list[Issue]:
 
 
 def check_empty_dims(ctx: dict) -> list[Issue]:
-    """有 key 但 data 完全空的维度"""
+    """有 key 但 data 完全空的维度 · v2.10.4 · profile-aware (lite 只查启用的维度)"""
     issues = []
     dims = ctx["dims"]
+
+    # v2.10.4 · 只检查当前 profile 启用的维度
+    enabled_nums = None
+    try:
+        from lib.analysis_profile import get_profile
+        profile = get_profile()
+        enabled_nums = {
+            int(k.split("_")[0])
+            for k in profile.fetchers_enabled
+            if k[0].isdigit() and k.split("_")[0].isdigit()
+        } or None
+    except Exception:
+        pass
+
     for k, v in sorted(dims.items()):
         if not isinstance(v, dict): continue
+        # 跳过 profile 未启用的维度
+        if enabled_nums is not None and k[0].isdigit():
+            try:
+                num = int(k.split("_")[0])
+                if num not in enabled_nums:
+                    continue
+            except ValueError:
+                pass
         data = v.get("data")
         if data in (None, {}, []):
             # 区分是 timeout 还是真空
@@ -312,20 +349,45 @@ def check_metals_materials_populated(ctx: dict) -> list[Issue]:
 
 
 def check_agent_analysis_exists(ctx: dict) -> list[Issue]:
-    """agent_analysis.json 是否写回（HARD-GATE 的机械化版本）"""
+    """agent_analysis.json 是否写回.
+
+    v2.10.4 · 分两档：
+      - 真实 agent 介入（Claude Code / Codex / Cursor 等）：missing → critical
+      - lite 模式 or CLI 直跑（没 agent）：missing → warning，允许报告生成
+    """
     issues = []
     ag = ctx.get("ag")
+
+    # v2.10.4 · 识别是否处于"无 agent 直跑"模式
+    import os
+    is_cli_only = (
+        os.environ.get("UZI_DEPTH") == "lite"
+        or os.environ.get("UZI_LITE") == "1"
+        or os.environ.get("UZI_CLI_ONLY") == "1"
+        # CI/batch 环境也视为无 agent
+        or os.environ.get("CI") == "true"
+    )
+
     if ag is None:
+        severity = "warning" if is_cli_only else "critical"
+        note = "（lite/CLI 直跑模式可接受）" if is_cli_only else ""
         issues.append(Issue(
-            severity="critical", category="self-check", dim="agent_analysis",
-            issue="agent_analysis.json 不存在，agent 未介入",
+            severity=severity,
+            category="self-check",
+            dim="agent_analysis",
+            issue=f"agent_analysis.json 不存在{note}",
             evidence="file not found",
-            suggested_fix="agent 必须读 panel.json + raw_data.json 后写 agent_analysis.json（含 dim_commentary / panel_insights / great_divide_override）",
+            suggested_fix=(
+                "CLI 直跑无 agent 环境可以忽略此项；"
+                "若走 Claude Code/Codex/Cursor 则 agent 必须读 panel.json + raw_data.json "
+                "后写 agent_analysis.json"
+            ),
         ))
         return issues
     if not ag.get("agent_reviewed"):
         issues.append(Issue(
-            severity="critical", category="self-check", dim="agent_analysis",
+            severity="warning" if is_cli_only else "critical",
+            category="self-check", dim="agent_analysis",
             issue="agent_analysis.agent_reviewed != True",
             evidence=f"agent_reviewed={ag.get('agent_reviewed')}",
             suggested_fix="agent 核查完内容后必须显式设置 agent_reviewed: true",

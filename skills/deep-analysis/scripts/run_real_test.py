@@ -1904,9 +1904,14 @@ def main(ticker: str = "002273.SZ"):
     # v2.3 · stage1 可能因中文名无法解析而早退，此时不能继续 stage2
     if isinstance(result, dict) and result.get("status") == "name_not_resolved":
         print("\n⚠️  因股票名无法解析，跳过 stage2（不会生成空报告）")
-        return
+        return result
+    # v2.10.4 · stage1 可能因非个股标的（ETF/指数/可转债）而早退，不能继续 stage2
+    if isinstance(result, dict) and result.get("status") == "non_stock_security":
+        print("\n⚠️  非个股标的，跳过 stage2（已输出成分股清单给 agent）")
+        return result
     report_path = stage2(ticker)
     print(f"\n🎯 完整流程结束 · 报告: {report_path}")
+    return report_path
 
 
 if __name__ == "__main__":

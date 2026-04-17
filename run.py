@@ -322,6 +322,13 @@ def main():
     from lib.market_router import is_chinese_name
     if is_chinese_name(args.ticker) and not args.force_name:
         stage1_result = _stage1(args.ticker)
+        # v2.10.4 · ETF/指数/可转债早退：stage1 已写 _resolve_error.json + 成分股清单
+        if isinstance(stage1_result, dict) and stage1_result.get("status") == "non_stock_security":
+            print(f"\n{'━' * 50}")
+            print(f"🔴 {args.ticker} 是 {stage1_result.get('label', '非个股标的')}，已跳过 stage2。")
+            print(f"   请选择上面列出的成分股之一重跑。")
+            print(f"{'━' * 50}")
+            sys.exit(0)
         if isinstance(stage1_result, dict) and stage1_result.get("status") == "name_not_resolved":
             cands = stage1_result.get("candidates", [])
             print(f"\n{'━' * 50}")
@@ -362,7 +369,21 @@ def main():
             if resolved:
                 args.ticker = resolved
     else:
-        run_analysis(args.ticker)
+        result = run_analysis(args.ticker)
+        # v2.10.4 · ETF/指数/可转债早退（stage1 已输出成分股清单，不生成报告）
+        if isinstance(result, dict) and result.get("status") in ("non_stock_security", "name_not_resolved"):
+            print(f"\n{'━' * 50}")
+            status = result.get("status")
+            if status == "non_stock_security":
+                print(f"🔴 {args.ticker} 是 {result.get('label', '非个股标的')}，已跳过 stage2。")
+                if result.get("top_holdings"):
+                    print(f"   请从上方列出的成分股里选一只重跑，例如：python run.py {result['top_holdings'][0]['code']}")
+                else:
+                    print(f"   {result.get('what_to_do', '请改用个股代码重跑。')}")
+            else:
+                print(f"🔴 {args.ticker} 股票名无法解析")
+            print(f"{'━' * 50}")
+            sys.exit(0)
 
     # 找到生成的报告
     from datetime import datetime

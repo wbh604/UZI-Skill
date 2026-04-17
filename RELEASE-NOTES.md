@@ -1,5 +1,43 @@
 # Release Notes
 
+## v2.10.4 — 2026-04-17 (lite 自查兼容 + ETF 早退干净)
+
+> **Codex 跑 v2.10.3 反馈的 3 个 bug · 全部修复 + 回归测试**
+
+### 修复
+
+**1. lite 模式与 self-review 规则冲突**
+- 症状：`UZI_DEPTH=lite` 跑完 gate 报 9 个 critical（维度缺失、data 为空）
+- 根因：`check_all_dims_exist` / `check_empty_dims` 硬编码检查全 20 维，不看 profile
+- 修：两个函数现在读 `analysis_profile.get_profile().fetchers_enabled`，只检查启用的维度
+- medium/deep 行为不变（仍强制 20 维）
+
+**2. agent_analysis.json 缺失在 CLI-only 运行误报 critical**
+- 症状：`python run.py` 直跑（无 agent 介入）→ gate 必定 critical，阻止 HTML 生成
+- 修：`check_agent_analysis_exists` 在 `UZI_DEPTH=lite` / `UZI_LITE=1` / `UZI_CLI_ONLY=1` / `CI=true` 时降级为 warning
+- 正常两段式流程（stage1 → agent → stage2）行为不变
+
+**3. ETF 早退逻辑半成功**
+- 症状：`python run.py 512400.SH` → stage1 正确识别 ETF 写 `_resolve_error.json`，但 stage2 仍被调用 → `RuntimeError: Stage 2 缺少数据`
+- 修 A：`run_real_test.main()` 加 `status == "non_stock_security"` 分支，跳过 stage2 并 `return result`
+- 修 B：`run.py` 捕获 `run_analysis(...)` 返回的 `non_stock_security` dict，打印成分股提示后 `sys.exit(0)`
+- 修 B2：中文名路径也加同样检查（指数/ETF 用中文名输入时）
+
+### 回归测试
+
+- 新增 `tests/test_v2_10_4_fixes.py` · 8 个用例覆盖上述 3 个 bug + 正向场景
+- 原 68 个 regression 全绿
+
+### 文件清单
+
+- `skills/deep-analysis/scripts/lib/self_review.py`（profile-aware · 3 处）
+- `skills/deep-analysis/scripts/run_real_test.py`（main() 加 ETF 早退 + 返回 result）
+- `run.py`（两条路径都捕获 non_stock_security 干净退出）
+- `skills/deep-analysis/scripts/tests/test_v2_10_4_fixes.py`（新）
+- 版本号 bump 到 2.10.4
+
+---
+
 ## v2.10.3 — 2026-04-18 (多源 providers 框架 + 三档深度 + 网络韧性)
 
 > **一次性合入近一天积累的所有性能 / 韧性 / 数据源改造**
