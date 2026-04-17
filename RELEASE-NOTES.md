@@ -1,5 +1,34 @@
 # Release Notes
 
+## v2.10.5 — 2026-04-18 (coverage threshold profile-aware · v2.10.4 遗漏补丁)
+
+> **Codex 跑 v2.10.4 真机测试再次反馈：lite 模式在网络差时仍被 self-review block**
+
+### Codex 测试发现的遗漏
+
+v2.10.4 修了 `check_all_dims_exist` / `check_empty_dims` / `check_agent_analysis_exists` 三处，但漏了 **`check_coverage_threshold`**：
+
+- 症状：`python run.py 600519.SH --depth lite` → coverage 17%（3/18）→ critical → block HTML 生成
+- 根因：`check_coverage_threshold` 用全 18 项 `CRITICAL_CHECKS` 做分母，不看 profile。lite 只跑 7 维，结构性偏低
+- 对比：`00700.HK` 同样 lite 跑出 44% → warning → HTML 生成 ✅（只是阈值擦边过）
+
+### 修复
+
+`check_coverage_threshold` (lib/self_review.py) · 两处改动：
+
+1. **Profile-aware 分母** — 只算当前档位启用维度的 `CRITICAL_CHECKS` 项
+2. **CLI-only / lite 模式降级** — `< 40%` 的 critical 降为 warning（CLI 直跑无 agent 可补数据，阻止 HTML 没意义，改为 warning 继续出报告供参考）
+
+### 回归测试
+
+- 新增 3 个用例 · `test_v2_10_4_fixes.py`:
+  - `test_coverage_critical_downgrades_in_lite` — lite + 17% coverage → warning ✅
+  - `test_coverage_critical_preserved_in_medium` — medium + 17% coverage → critical ✅ (回归护栏)
+  - `test_coverage_profile_aware_denominator` — lite + 启用维度全满 → 0 issues ✅
+- 原 76 个 regression 全绿 → **79 passed**
+
+---
+
 ## v2.10.4 — 2026-04-17 (lite 自查兼容 + ETF 早退干净)
 
 > **Codex 跑 v2.10.3 反馈的 3 个 bug · 全部修复 + 回归测试**

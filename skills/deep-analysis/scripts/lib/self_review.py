@@ -248,16 +248,73 @@ def check_panel_non_empty(ctx: dict) -> list[Issue]:
 
 
 def check_coverage_threshold(ctx: dict) -> list[Issue]:
-    """_integrity.coverage_pct 必须 >= 60%"""
+    """_integrity.coverage_pct 必须 >= 60% · v2.10.5 · profile-aware + CLI 宽容.
+
+    修正 v2.10.4 遗漏：`check_all_dims_exist` / `check_empty_dims` 已 profile-aware，
+    但 `check_coverage_threshold` 之前仍用全 18 项 CRITICAL_CHECKS 分母 →
+    lite 模式（只跑 7 维）结构性判定 critical（600519 跑出 3/18=17% → block HTML）。
+
+    修复：
+    1. 用 profile.fetchers_enabled 过滤 CRITICAL_CHECKS，分母只算启用维度
+    2. 在 CLI-only / lite 模式下，critical 降级为 warning（CLI 直跑没 agent 补数据，
+       阻止 HTML 没意义；报告里仍会显示 warning 提醒用户）
+    """
     issues = []
     integrity = ctx["raw"].get("_integrity") or {}
     pct = integrity.get("coverage_pct", 100)
+    missing_critical_list = integrity.get("missing_critical", [])
+
+    # v2.10.5 · profile-aware 重算 coverage（仅当 profile 可用）
+    try:
+        from lib.analysis_profile import get_profile
+        from lib.data_integrity import CRITICAL_CHECKS
+        profile = get_profile()
+        enabled = profile.fetchers_enabled
+        raw_dims = ctx.get("raw", {}).get("dimensions", {}) or {}
+        # 只算 profile 启用维度的检查项
+        filtered_total = 0
+        filtered_passed = 0
+        for dim_key, path, _label, _crit in CRITICAL_CHECKS:
+            if dim_key not in enabled:
+                continue
+            filtered_total += 1
+            dim = raw_dims.get(dim_key) or {}
+            data = dim.get("data") or {}
+            # 复用 data_integrity._is_missing 逻辑
+            from lib.data_integrity import _get, _is_missing
+            val = _get(data, path)
+            if not _is_missing(val):
+                filtered_passed += 1
+        if filtered_total:
+            pct = round(filtered_passed / filtered_total * 100, 0)
+            # 过滤后的 missing_critical 也要重算
+            missing_critical_list = [
+                m for m in missing_critical_list if m.get("dim") in enabled
+            ]
+    except Exception:
+        pass  # 无 profile 模块，fallback 原逻辑
+
     if pct < 60:
+        # 默认严重度：< 40% critical；否则 warning
+        severity = "critical" if pct < 40 else "warning"
+        # CLI-only / lite 模式下降级：即使 critical 也降 warning（无 agent 可补）
+        import os as _os
+        is_cli_only = (
+            _os.environ.get("UZI_DEPTH") == "lite"
+            or _os.environ.get("UZI_LITE") == "1"
+            or _os.environ.get("UZI_CLI_ONLY") == "1"
+            or _os.environ.get("CI") == "true"
+        )
+        if severity == "critical" and is_cli_only:
+            severity = "warning"
+            note = "（lite/CLI 直跑模式降级为 warning，仍出报告供参考）"
+        else:
+            note = ""
         issues.append(Issue(
-            severity="critical" if pct < 40 else "warning",
+            severity=severity,
             category="data", dim="overall",
-            issue=f"数据完整性仅 {pct:.0f}%（< 60% 不该出报告）",
-            evidence=f"coverage_pct={pct}, missing_critical={integrity.get('missing_critical', [])[:3]}",
+            issue=f"数据完整性仅 {pct:.0f}%（< 60% 不该出报告）" + note,
+            evidence=f"coverage_pct={pct}, missing_critical={missing_critical_list[:3]}",
             suggested_fix="agent 用 WebSearch / mx_api 补齐 missing_critical 维度，重跑 stage2",
         ))
     return issues

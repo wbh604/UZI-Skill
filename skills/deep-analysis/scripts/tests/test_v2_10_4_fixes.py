@@ -171,3 +171,108 @@ def test_main_returns_early_on_name_not_resolved(monkeypatch):
 
     rrt.main("不存在的股票")
     assert stage2_called["flag"] is False
+
+
+# ─── v2.10.5 · Codex 反馈 Test 2 新发现：check_coverage_threshold 不 profile-aware ───
+
+def test_coverage_critical_downgrades_in_lite():
+    """Fix (v2.10.5) · lite mode should not block HTML on coverage_pct<40 (no agent to fix)."""
+    _reset_profile_env()
+    os.environ["UZI_DEPTH"] = "lite"
+    import importlib
+    import lib.analysis_profile as ap
+    importlib.reload(ap)
+    import lib.self_review as sr
+    importlib.reload(sr)
+
+    ctx = {
+        "raw": {
+            "_integrity": {
+                "coverage_pct": 17,
+                "missing_critical": [
+                    {"dim": "0_basic", "path": "name", "label": "公司名称"}
+                ],
+            },
+            "dimensions": {},
+        },
+        "dims": {}, "market": "A", "ag": None,
+    }
+    issues = sr.check_coverage_threshold(ctx)
+    assert len(issues) == 1
+    assert issues[0].severity == "warning", (
+        f"lite mode should downgrade low coverage to warning, got {issues[0].severity}"
+    )
+    _reset_profile_env()
+
+
+def test_coverage_critical_preserved_in_medium():
+    """Medium/default must still critical on low coverage (regression guard)."""
+    _reset_profile_env()
+    import importlib
+    import lib.analysis_profile as ap
+    importlib.reload(ap)
+    import lib.self_review as sr
+    importlib.reload(sr)
+
+    ctx = {
+        "raw": {
+            "_integrity": {
+                "coverage_pct": 17,
+                "missing_critical": [{"dim": "0_basic", "path": "name", "label": "x"}],
+            },
+            "dimensions": {},
+        },
+        "dims": {}, "market": "A", "ag": None,
+    }
+    issues = sr.check_coverage_threshold(ctx)
+    assert issues[0].severity == "critical"
+
+
+def test_coverage_profile_aware_denominator():
+    """Fix (v2.10.5) · denominator should exclude dims not in profile.
+
+    With lite (7 dims: 0_basic, 1_financials, 2_kline, 10_valuation, 11_governance,
+    15_events, 16_lhb), CRITICAL_CHECKS items for 7_industry + 14_moat should be
+    excluded → fully-populated lite dims should compute ~100% coverage.
+    """
+    _reset_profile_env()
+    os.environ["UZI_DEPTH"] = "lite"
+    import importlib
+    import lib.analysis_profile as ap
+    importlib.reload(ap)
+    import lib.self_review as sr
+    importlib.reload(sr)
+
+    # Realistic raw: all lite dims have their CRITICAL_CHECKS fields populated
+    dims = {
+        "0_basic": {"data": {
+            "name": "贵州茅台", "price": 1500, "industry": "白酒", "market_cap": 18000,
+            "pe_ttm": 25, "pb": 8.5,
+        }},
+        "1_financials": {"data": {
+            "roe_history": [30, 28, 25],
+            "revenue_history": [1000, 900, 800],
+            "net_profit_history": [500, 400, 350],
+            "financial_health": {"ok": True},
+        }},
+        "2_kline": {"data": {
+            "stage": "牛二", "ma_align": "多头", "macd": "金叉",
+        }},
+        "10_valuation": {"data": {
+            "pe": 25, "pe_quantile": 0.6, "pb_quantile": 0.7,
+        }},
+    }
+    ctx = {
+        "raw": {
+            "_integrity": {"coverage_pct": 80, "missing_critical": []},  # stale
+            "dimensions": dims,
+        },
+        "dims": dims, "market": "A", "ag": None,
+    }
+    issues = sr.check_coverage_threshold(ctx)
+    # With all enabled-dim fields filled, recomputed pct should be high enough
+    # that check fires no issue (pct >= 60)
+    assert len(issues) == 0, (
+        f"lite with full enabled-dim data should produce no coverage issues; got {[i.issue for i in issues]}"
+    )
+    _reset_profile_env()
