@@ -248,12 +248,19 @@ def main():
                         help="绕过中文名纠错直接使用指定代码 (如 --force-name 000582.SZ)")
     parser.add_argument("--no-resume", action="store_true",
                         help="v2.6 · 强制重抓所有 fetcher（默认 resume：复用 .cache/{ticker}/raw_data.json 已有维度）")
+    parser.add_argument("--enable-xueqiu-login", action="store_true",
+                        help="v2.7.1 · 启用 XueQiu Playwright 登录态抓取实盘比赛持仓（首次需 `python -m lib.xueqiu_browser login`）")
     args = parser.parse_args()
 
     # v2.3 · --force-name 直接覆盖
     if args.force_name:
         print(f"   [force-name] {args.ticker} → {args.force_name}")
         args.ticker = args.force_name
+
+    # v2.7.1 · XueQiu login opt-in
+    if args.enable_xueqiu_login:
+        os.environ["UZI_XQ_LOGIN"] = "1"
+        print("🔓 启用 XueQiu 登录态（19_contests 维度抓实盘组合）")
 
     env = detect_environment()
 

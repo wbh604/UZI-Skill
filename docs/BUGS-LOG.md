@@ -5,6 +5,30 @@
 
 ---
 
+## v2.7.1 (2026-04-17 hotfix)
+
+### BUG#R5 · 19_contests xueqiu_cubes 全空（XueQiu 登录政策变化）
+- **症状**：实盘比赛维度始终 0 个 cube，无任何雪球组合显示
+- **根因**：`xueqiu.com/cubes/cubes_search.json` 2026 年起强制登录，HTTP 直访
+  返 `400 + error_code: "400016"`（"遇到错误，请刷新页面或者重新登录"）
+- **修法**：
+  - 新 `lib/xueqiu_browser.py` Playwright + 持久化 cookie
+  - `fetch_contests` HTTP fail → 检查 UZI_XQ_LOGIN → Playwright fallback
+  - 未登录 → 透明标 `_login_required: True` + commentary 显示"⚠️ XueQiu 需登录"
+  - run.py 加 `--enable-xueqiu-login` flag，README 说明登录步骤
+- **回归测试**：`test_no_regressions.py::test_contests_login_required_marked`
+- **若未来改 fetch_contests**：必须保留 `xueqiu_meta.login_required` 标记
+
+### BUG#R6 · 18_trap signals 全 0（ddgs cache 残留）
+- **症状**：杀猪盘 8 信号扫描永远命中 0/8（`signals_hit_count: 0`）
+- **根因**：v2.6.1 之前 ddgs 未装时 `_ddg_search` 返 [] 被 cache 缓存了 12h；
+  装 ddgs 后 cache 仍有效 → 永远返空
+- **修法**：清 `.cache/_global/api_cache/ws__*.json` cache（一次性）
+  + 改 `_auto_summarize_dim` 让 18_trap 显示 "已扫 ddgs 24 条搜索结果" 透明状态
+- **若未来 lib/web_search 改依赖**：必须 bump cache_key_prefix 强制失效
+
+---
+
 ## v2.7.0 (2026-04-17)
 
 ### BUG#R1 · `detect_style` 漏掉负 ROE 的困境股

@@ -163,6 +163,38 @@ def test_hk_branches_isolated():
                 f"BUG regression: {fn_name} HK branch 必须有 try/except 隔离"
 
 
+# ─── BUG#R5 (v2.7.1) · 19_contests login_required 必须透明标记 ──
+def test_contests_login_required_marked():
+    src = (SCRIPTS_DIR / "fetch_contests.py").read_text(encoding="utf-8")
+    assert "login_required" in src, \
+        "BUG#R5 regression: fetch_contests 必须返回 login_required 标记（XueQiu 2026 起需登录）"
+    assert "xueqiu_browser" in src, \
+        "BUG#R5 regression: fetch_contests 必须 fallback 到 lib.xueqiu_browser"
+
+
+# ─── BUG#R5 (v2.7.1) · xueqiu_browser 模块必须存在 + 默认 opt-in ──
+def test_xueqiu_browser_opt_in_only():
+    src = (SCRIPTS_DIR / "lib" / "xueqiu_browser.py").read_text(encoding="utf-8")
+    assert "is_login_enabled" in src, "BUG#R5 regression: xueqiu_browser 必须有 opt-in 检查"
+    assert "UZI_XQ_LOGIN" in src, "BUG#R5 regression: 必须用 UZI_XQ_LOGIN env 启用"
+    assert "PROFILE_DIR" in src, "BUG#R5 regression: 必须用持久化 profile 保存 cookie"
+
+
+# ─── BUG#R6 (v2.7.1) · auto_summarize 18_trap/19_contests 必须透明 ──
+def test_auto_summarize_trap_contests_transparent():
+    src = (SCRIPTS_DIR / "run_real_test.py").read_text(encoding="utf-8")
+    fn_idx = src.find("def _auto_summarize_dim")
+    assert fn_idx > 0
+    end = src.find("def generate_synthesis", fn_idx)
+    block = src[fn_idx:end]
+    # 18_trap 应显示 "已扫" 类透明字眼，不能是 "暂无" 或 "(empty)"
+    assert "8 信号扫描" in block, \
+        "BUG#R6 regression: 18_trap auto-summary 必须显示 8 信号扫描状态"
+    # 19_contests 应处理 login_required 情况
+    assert "需登录" in block or "login_required" in block, \
+        "BUG#R5/R6 regression: 19_contests auto-summary 必须处理 XueQiu 登录态"
+
+
 # ─── 整体烟测：所有模块在 Py3.9 能 import ──
 def test_all_lib_imports_ok():
     import importlib
@@ -171,7 +203,7 @@ def test_all_lib_imports_ok():
         "lib.cache", "lib.data_sources", "lib.market_router", "lib.mx_api",
         "lib.name_matcher", "lib.hk_data_sources", "lib.data_source_registry",
         "lib.data_integrity", "lib.web_search", "lib.agent_analysis_validator",
-        "lib.quant_signal", "lib.stock_style",
+        "lib.quant_signal", "lib.stock_style", "lib.xueqiu_browser",
     ]:
         try:
             importlib.import_module(mod)

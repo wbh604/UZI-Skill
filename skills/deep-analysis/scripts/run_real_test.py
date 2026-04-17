@@ -832,16 +832,30 @@ def _auto_summarize_dim(dim_key: str, label: str, dim: dict, score: float) -> st
         return f"{label}：热度 {hot}；情绪 {senti}。"
 
     if dim_key == "18_trap":
+        # v2.7.1: 字段名其实是 signals_hit_count（不是 hit_signals_count），修；显示 8 信号扫描结果
         level = _v("trap_level", "level")
-        n_signals = _v("hit_signals_count", default=0)
+        n_signals = data.get("signals_hit_count", data.get("hit_signals_count", 0))
+        scanned = data.get("signals_hit", "?/8")
         rec = _v("recommendation")
-        return f"{label}：{level}；命中信号 {n_signals} 条；建议：{rec}。"
+        detail = data.get("signals_hit_detail") or []
+        if detail:
+            kws = [s.get("name", "") for s in detail[:3]]
+            return f"{label}：{level} · 8 信号扫描命中 {scanned}（{('、'.join(kws))}）· 建议：{rec}"
+        return f"{label}：{level} · 8 信号扫描命中 {scanned}（已扫 ddgs 24 条搜索结果）· 建议：{rec}"
 
     if dim_key == "19_contests":
-        cnt = _v("contests_count", default=None)
-        if cnt:
-            return f"{label}：实盘比赛上榜 {cnt} 次。"
-        return f"{label}：暂未上榜实盘比赛。"
+        # v2.7.1: 字段名是 summary.xueqiu_cubes_total，不是 contests_count；要看 login_required
+        summary = data.get("summary") or {}
+        n_cubes = summary.get("xueqiu_cubes_total", 0)
+        n_high = summary.get("high_return_cubes", 0)
+        login_req = summary.get("xueqiu_login_required", False)
+        src = summary.get("xueqiu_source", "http")
+        if login_req and n_cubes == 0:
+            return (f"{label}：⚠️ XueQiu cubes 接口需登录（2026 起新政），未启用 → 0 cube。"
+                    f"启用方式：export UZI_XQ_LOGIN=1 + python -m lib.xueqiu_browser login")
+        if n_cubes:
+            return f"{label}：雪球 {n_cubes} 个组合持有本股（高收益 >50% 的有 {n_high} 个）· 来源 {src}"
+        return f"{label}：雪球 0 个组合持有本股（可能小盘 / 冷门 / 接口未返）"
 
     # Default: just enumerate top fields
     items = []

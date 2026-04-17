@@ -1,5 +1,43 @@
 # Release Notes
 
+## v2.7.1 — 2026-04-17 (hotfix)
+
+> **修复 `19_contests` / `18_trap` 两维永远空的两个独立 bug**
+
+### 用户报告
+> "实盘比赛持仓，杀猪盘信号这些还是没数据"
+
+### 根因 1（R5）· XueQiu 2026 加登录鉴权
+- `xueqiu.com/cubes/cubes_search.json` 直访 → `400 + error_code: "400016"`
+- 旧 fetch_contests 把任何 status≠200 当 0 cube → 19_contests 永空
+- 修：新 `lib/xueqiu_browser.py` Playwright + 持久化 cookie；fetch_contests 透明
+  标记 `login_required: True`；用户可 `--enable-xueqiu-login` opt-in
+- README 加「需登录的数据源」章节，说明启用步骤
+
+### 根因 2（R6）· ddgs 缓存空结果残留
+- v2.6.1 之前 ddgs 没装 → `_ddg_search()` 返 [] → cache 缓存 12h
+- 装 ddgs 后 cache 仍生效 → trap_signals 8 信号永远命中 0
+- 修：清 `.cache/_global/api_cache/ws__*` cache（一次性）
+- `_auto_summarize_dim` 改成显示 "8 信号扫描命中 0/8（已扫 ddgs 24 条搜索结果）"，
+  让用户清楚是"扫了 0 命中"而不是"没扫"
+
+### 新增
+- `lib/xueqiu_browser.py` (~140 行) · Playwright + 持久化 cookie + opt-in 登录流程
+- `run.py --enable-xueqiu-login` flag · `UZI_XQ_LOGIN=1` env var
+- README "🔓 需登录的数据源" 章节
+- BUGS-LOG · BUG#R5 + BUG#R6 记录
+- 3 个新回归测试（共 18 个，全部通过）
+
+### 浙江东方实测对比
+| 维度 | 修前 | 修后 |
+|---|---|---|
+| 19_contests commentary | "暂未上榜实盘比赛"（误导：其实是接口 401） | "⚠️ XueQiu 需登录，启用方式：..." |
+| 18_trap commentary | "🟢 安全；命中信号 0 条" | "🟢 安全 · 8 信号扫描命中 0/8（已扫 ddgs 24 条结果）" |
+
+启用 XueQiu 登录后，可看到 50+ 个雪球组合持有 + 收益率分布。
+
+---
+
 ## v2.7.0 — 2026-04-17
 
 > **按股票风格动态加权评分 + 量化基金结构性识别 + 4 个 regression bug 修复 + 防回归测试 + bug 全量记录**

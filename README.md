@@ -293,6 +293,45 @@ cp .env.example .env
 
 无 key 时全部回退到 XueQiu/akshare 链，现有用户零感知。
 
+### 🔓 需登录的数据源（v2.7.1 新增）
+
+部分数据源 2026 年起加了登录鉴权，UZI-Skill 默认**不主动弹登录窗**（保持无人值守）。
+用户可按需启用：
+
+| 数据源 | 维度 | 启用方式 | 影响 |
+|---|---|---|---|
+| **XueQiu cubes_search.json** | `19_contests` 实盘比赛持仓 | `export UZI_XQ_LOGIN=1` 然后 `python -m lib.xueqiu_browser login`（一次性弹浏览器登录） | 不启用：报告 19_contests 显示"⚠️ XueQiu 需登录，0 cube"；启用后能看到雪球 50+ 个实盘组合持有本股 |
+
+#### XueQiu 登录步骤
+
+```bash
+# 1. 启用环境变量（一次性，可加进 .zshrc）
+export UZI_XQ_LOGIN=1
+
+# 2. 一次性登录（首次跑会弹有头浏览器，登录后回到终端按回车）
+python -m lib.xueqiu_browser login
+# → 浏览器弹出，手动账密 / 微信扫码 / 短信登录
+# → 登录成功后回终端按回车，cookie 持久化到 ~/.uzi-skill/playwright-xueqiu/
+
+# 3. 后续跑分析自动复用登录态（cookie 通常有效 ≥ 30 天）
+python run.py 贵州茅台 --no-browser
+# 19_contests 维度会显示真实雪球组合数 + 收益率分布
+
+# 4. 如果直接跑 run.py 想启用，加 flag
+python run.py 贵州茅台 --enable-xueqiu-login
+```
+
+#### 跳过登录（默认行为）
+
+不想登录？什么都不用做。XueQiu 维度会清晰标注 `⚠️ 需登录，0 cube`，
+其他 21 个维度照常工作。
+
+#### 状态查询
+```bash
+python -m lib.xueqiu_browser status
+# 显示：profile dir / cookie 是否存在 / 是否启用
+```
+
 ### 🚨 数据缺口怎么处理（v2.3）
 
 若某些字段脚本拿不到（网络限制 / 新股 / 停牌），pipeline **不会塞默认值糊弄**：
