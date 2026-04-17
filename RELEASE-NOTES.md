@@ -1,5 +1,48 @@
 # Release Notes
 
+## v2.7.0 — 2026-04-17
+
+> **按股票风格动态加权评分 + 量化基金结构性识别 + 4 个 regression bug 修复 + 防回归测试 + bug 全量记录**
+
+### 主线 · 风格动态加权（解决"分数都偏低、一片回避"的系统性问题）
+
+旧公式 `consensus = bullish/active*100` 太严苛 → overall 普遍 < 40 → 一片回避。
+
+新机制：
+- **7 + 1 个 style** · 白马 / 高成长 / 周期 / 小盘投机 / 分红防御 / 困境反转 / 量化因子型 / 中性兜底
+- `lib/stock_style.py` 自动识别 + 7×7 评委组矩阵 + 8 个个体 override
+- 22 维 fundamental dim multiplier
+- **neutral 半权计入 consensus**（修正旧公式 0% 权重核心 bug）
+
+### 量化因子型 · 结构性识别（用户特别要求）
+
+`lib/quant_signal.py` · 不维护白名单，用结构性特征：
+> 第一大持仓 < 2% → 疑似量化基金；该股在多少家这种基金 top-10 → 触发 quant_factor
+
+私募量化备查名单（10 个 · 幻方/九坤/灵均/明汯等）供 agent 走 LHB / web search 交叉验证。
+
+### 修复 4 个 BUG（用户实测发现）
+
+| ID | 症状 | 修法 |
+|---|---|---|
+| **R1** | ST 股错判 small_speculative | distressed 条件支持负 ROE |
+| **R2** | fund_managers 还是 6 个 | wave3 调用 `limit=None`；浙江东方 6 → **332 个** |
+| **R3** | agent 没主动核查就出报告 | 新 HARD-GATE-FINAL-CHECK |
+| **R4** | mini_racer V8 crash on Py3.13 | wave3 默认 serial workers |
+
+### 防回归基础设施
+- `docs/BUGS-LOG.md` — 全量 bug 历史 + 10 条 don't 清单
+- `scripts/tests/test_no_regressions.py` — 15 个回归测试，全部通过
+
+### 浙江东方实测对比
+| 项 | v2.6.1 | v2.7.0 |
+|---|---|---|
+| panel_consensus | 6.0 | **17.0** (+11.0) |
+| **overall_score** | **39.8 (回避)** | **44.2 (谨慎)** |
+| fund_managers 显示 | 6 个 | **332 个** |
+
+---
+
 ## v2.6.1 — 2026-04-17 (hotfix)
 
 > **追加论坛 bug · 直跑模式定性维度依然空** 修复

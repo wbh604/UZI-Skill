@@ -285,10 +285,11 @@ def main(ticker: str, limit: int | None = None) -> dict:
             "fund_url": f"https://fund.eastmoney.com/{fund_code}.html",
         }
 
-    # 并行度默认 3（低于 akshare 在 Py3.13 下 libffi 并发的不稳定阈值）；
-    # 设置 UZI_FUND_WORKERS=1 可切换为纯串行。
+    # 并行度默认 1（serial）— Py3.13 下 akshare 内部 mini_racer/libffi 并发会致命崩溃。
+    # 设置 UZI_FUND_WORKERS=N (N>1) 强制并行（自担 V8 isolate crash 风险）。
+    # BUG#v2.4-followup: 默认 3 在 Py3.13 + macOS 下 fund_portfolio_hold_em 也会崩。
     import os as _os
-    _workers = int(_os.environ.get("UZI_FUND_WORKERS", "3"))
+    _workers = int(_os.environ.get("UZI_FUND_WORKERS", "1"))
     managers: list[dict] = []
     if _workers <= 1:
         for row in iter_holders:

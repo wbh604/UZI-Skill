@@ -261,7 +261,10 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
     def _fund_holders():
         try:
             import fetch_fund_holders
-            fh = fetch_fund_holders.main(ticker, limit=6)
+            # BUG#R2 fix: v2.4 已把 fetcher limit 改为 None（不截断），但 wave3 调用
+            # 还是写死 limit=6 → 报告里只显示 6 个基金。这次同步移除调用层的截断。
+            # 茅台 649 家、浙江东方 80 家全收录；render_fund_managers 已支持紧凑行展开。
+            fh = fetch_fund_holders.main(ticker, limit=None)
             return ("fund_managers", (fh.get("data") or {}).get("fund_managers", []), None)
         except Exception as e:
             return ("fund_managers", [], str(e))
@@ -1019,8 +1022,55 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
     name = basic.get("name") or raw.get("ticker")
     price = basic.get("price") or 0
 
+    # v2.7 · 按股票风格动态加权（解决 "几乎一片回避" 的系统性偏差）
+    # detect_style 识别：白马/高成长/周期/小盘投机/分红防御/困境反转/量化因子/中性
+    # apply_style_weights：评委组级×个体 override 加权 + 22 维 fundamental dim mult
+    # neutral 半权计入 consensus（修正旧公式 0% 权重的问题）
+    style_label = "balanced"
+    style_diag = {}
     fund_score = dims_scored.get("fundamental_score", 60)
     consensus = panel.get("panel_consensus", 50)
+    fund_score_old = fund_score
+    consensus_old = consensus
+    try:
+        from lib.stock_style import detect_style, apply_style_weights, STYLE_LABELS, STYLE_EXPLANATIONS
+        # Build feature dict for style detection
+        bd = basic
+        try:
+            mcap_yi = float(bd.get("market_cap_raw") or 0) / 1e8 if bd.get("market_cap_raw") else 0
+        except (ValueError, TypeError):
+            mcap_yi = 0
+        # 简化的局部数字转换（避开 generate_synthesis 内 _f 作用域冲突）
+        def _ff(v, dflt=0.0):
+            try:
+                if v is None or v == "":
+                    return dflt
+                return float(str(v).replace(",", "").replace("%", "").replace("亿", "").replace("+", "").strip())
+            except (ValueError, TypeError):
+                return dflt
+        d_fin = (dims_scored.get("dimensions", {}).get("1_financials") or {})
+        feat_for_style = {
+            "code": raw.get("ticker", ""),
+            "market": raw.get("market", "A"),
+            "industry": bd.get("industry", "") or "",
+            "market_cap_yi": mcap_yi,
+            "pe": _ff(bd.get("pe_ttm")),
+            "pe_ttm": _ff(bd.get("pe_ttm")),
+            "pb": _ff(bd.get("pb")),
+            "roe_5y_avg": _ff(d_fin.get("roe_5y_avg")),
+            "roe_5y_min": _ff(d_fin.get("roe_5y_min")),
+            "revenue_growth_3y_cagr": _ff(d_fin.get("revenue_growth_3y_cagr")),
+            "dividend_yield": _ff(bd.get("dividend_yield_ttm")),
+        }
+        style_label = detect_style(feat_for_style, raw)
+        adj = apply_style_weights(panel.get("investors", []), dims_scored, style_label)
+        fund_score = adj["fundamental_score"]
+        consensus = adj["panel_consensus"]
+        style_diag = adj["diagnostics"]
+        print(f"\n  🎯 v2.7 风格识别: {style_label} ({STYLE_LABELS.get(style_label,'?')}) — fund {fund_score_old:.1f}→{fund_score:.1f} · consensus {consensus_old:.1f}→{consensus:.1f}")
+    except Exception as _se:
+        print(f"  ⚠️ v2.7 风格加权失败（沿用原始公式）: {type(_se).__name__}: {str(_se)[:120]}")
+
     overall = fund_score * 0.6 + consensus * 0.4
 
     if overall >= 85: verdict_label = "值得重仓"
@@ -1245,6 +1295,11 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
             "bcg_position": (competitive.get("bcg_position") or {}).get("category"),
             "industry_attractiveness": competitive.get("industry_attractiveness_pct"),
         },
+        # v2.7 · 风格识别 + 加权诊断（让 HTML 报告显示 + agent 可在 agent_analysis.json 覆盖 style）
+        "detected_style": style_label,
+        "style_label_cn": (lambda: __import__("lib.stock_style", fromlist=["STYLE_LABELS"]).STYLE_LABELS.get(style_label, "?"))() if style_label else "?",
+        "style_explanation": (lambda: __import__("lib.stock_style", fromlist=["STYLE_EXPLANATIONS"]).STYLE_EXPLANATIONS.get(style_label, ""))() if style_label else "",
+        "style_diagnostics": style_diag,
         "agent_reviewed": bool(ag.get("agent_reviewed")),
         "panel_insights": ag.get("panel_insights") or "",
         "claude_narrative_stub": {
