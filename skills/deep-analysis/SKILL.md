@@ -81,6 +81,65 @@ description: 个股深度分析的核心工作流。当用户要求"深度分析
 用户要求原话："不能只靠数据爬取，必须要 agent 介入高强度分析 + 多 agent 操作一定要加入进去"
 </HARD-GATE>
 
+### 🎯 STYLE-WEIGHTING · 按股票风格动态加权（v2.7 · 自动）
+
+stage2 自动识别股票 style（白马 / 高成长 / 周期 / 小盘投机 / 分红防御 /
+困境反转 / 量化因子 / 中性兜底），按 style 调整：
+- 51 评委组级权重（A-G × style 矩阵）+ 8 个个体 override
+- 22 维 fundamental dim multiplier
+- neutral 半权计入 consensus（修正旧公式 0% 权重的问题）
+报告 hero 区会显示 style chip + 加权前后分数对比。
+
+**Agent 可在 `agent_analysis.json` 显式覆盖 style**（若你认为脚本误判）：
+```json
+{
+  "agent_reviewed": true,
+  "detected_style_override": "growth_tech",
+  "style_override_reason": "市值虽大但属于科技成长轨道，不是传统白马"
+}
+```
+
+**量化因子型 detection（用户特别要求）**：
+- `lib/quant_signal.detect_quant_signal` 用结构性特征：基金 top-1 持仓 < 2%
+  → 疑似量化（无需名字含"量化"）
+- 持有目标股票的基金里 ≥ 3 家量化基金且把目标股放进 top-10 → quant_factor
+
+**私募量化交叉验证**（agent 可选）：
+若 quant_signal.count < 3 但你怀疑有私募量化重仓本股：
+1. 查 dim_16_lhb 前 10 大游资席位是否含 `lib.quant_signal.KNOWN_PRIVATE_QUANTS`
+   （幻方 / 九坤 / 灵均 / 鸣石 / 因诺 / 明汯 / 玄信 / 衍复 / 宽德 / 念空）
+2. `web_search "{name} 幻方 OR 九坤 OR 灵均 OR 明汯 重仓"`
+3. `akshare.stock_main_stock_holder({code})` 看大股东列表
+若交叉验证有 ≥ 1 家私募 + ≥ 1 家公募 → 升级 detected_style 为 quant_factor
+
+### ⛔ HARD-GATE-FINAL-CHECK · 报告输出前必须最后核查（v2.7）
+
+<HARD-GATE>
+在 stage2 完成后、把 standalone HTML 链接发给用户**之前**，agent 必须做最后核查：
+
+1. **打开 `.cache/{ticker}/synthesis.json`** 检查：
+   - `dim_commentary` 是否 22 维都有内容（不是 missing / "[脚本占位]"）
+   - `detected_style` 是否合理（白马股不应判成 small_speculative）
+   - `overall_score` 与 `panel_consensus` 与 `fundamental_score` 数学关系正确（≈ 0.6/0.4）
+2. **打开 `.cache/{ticker}/raw_data.json`** 检查：
+   - `_integrity.coverage_pct ≥ 80%`（< 80% 必须用浏览器/MX/WebSearch 补齐）
+   - `fund_managers` 数量是否合理（茅台级别应 100+，小盘可能 < 10）
+3. **若有缺口**：
+   - 主动用 `WebSearch` / `mx_api` / `Chrome MCP` 抓取缺失字段
+   - 写 `agent_analysis.json` 的 `dim_commentary` 覆盖
+   - 重跑 `stage2()` 让 HTML 用最新数据
+4. **若数据真拿不到**：
+   - 在 `agent_analysis.json` 显式 `data_gap_acknowledged[dim] = "已尝试 X/Y/Z 都失败"`
+   - HTML 报告会显示橙色徽章而非假数据
+
+**绝不能**：
+- 直接把第一次 stage2 的输出当最终报告（必须人工/agent 检查一遍）
+- 看到 missing/占位 字符就发链接
+- 看到 detected_style = balanced 就放过（balanced 经常是兜底，不一定是真"无风格"）
+
+用户原话："所有数据的补全问题都要做 agent 兜底和最后核查"
+</HARD-GATE>
+
 ### ⛔ HARD-GATE-FACTCHECK · 禁止编造未在 raw_data 出现的事实（v2.6）
 
 <HARD-GATE>

@@ -153,6 +153,42 @@ body::after {
 .data-gap-banner .chip.ack { background: rgba(148, 163, 184, 0.15); color: var(--text-dim); border-color: var(--border); text-decoration: line-through; }
 .data-gap-banner .hint { margin-top: 8px; font-size: 11px; color: var(--text-dim); letter-spacing: .05em; }
 
+/* ═══════════════ STYLE CHIP · v2.7 ═══════════════ */
+.style-chip-wrap {
+  margin: 16px 0 24px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(99, 102, 241, 0.04));
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  border-left: 4px solid #6366f1;
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.style-chip-wrap .icon { font-size: 22px; }
+.style-chip-wrap .label { font-family: 'Space Grotesk', sans-serif; font-size: 11px; letter-spacing: .12em; color: var(--text-dim); text-transform: uppercase; }
+.style-chip-wrap .value {
+  font-family: 'Fira Sans', sans-serif;
+  font-size: 17px; font-weight: 800;
+  color: #6366f1;
+  padding: 3px 10px;
+  background: rgba(99, 102, 241, 0.15);
+  border-radius: 6px;
+}
+.style-chip-wrap .hint { font-size: 12px; color: var(--text-bright); flex: 1 1 280px; line-height: 1.5; }
+.style-chip-wrap .compare {
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-tinted);
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.style-chip-wrap .delta-up { color: var(--bull-green); font-weight: 700; }
+.style-chip-wrap .delta-down { color: var(--bear-red); font-weight: 700; }
+
 /* ═══════════════ BENTO HERO ═══════════════ */
 .bento-hero {
   display: grid;
@@ -2247,6 +2283,9 @@ footer strong { color: var(--text-dim); }
 
   <!-- ─── DATA QUALITY BANNER · v2.3 (only rendered when _data_gaps.json exists) ─── -->
   <!-- INJECT_DATA_GAP_BANNER -->
+
+  <!-- ─── STYLE CHIP · v2.7 (动态加权风格识别说明) ─── -->
+  <!-- INJECT_STYLE_CHIP -->
 
   <!-- ─── BENTO HERO ─── -->
   <div class="bento-hero">

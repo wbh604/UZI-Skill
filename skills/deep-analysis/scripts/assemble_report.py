@@ -2331,6 +2331,44 @@ def _render_competitive_analysis(dim22: dict) -> str:
     '''
 
 
+def _render_style_chip(syn: dict) -> str:
+    """v2.7 · Render the style identification chip (动态加权说明)."""
+    style = syn.get("detected_style")
+    if not style:
+        return ""
+    label = syn.get("style_label_cn") or style
+    explanation = syn.get("style_explanation") or ""
+    diag = syn.get("style_diagnostics") or {}
+    fund_old = diag.get("raw_fund_old", 0)
+    fund_new = syn.get("fundamental_score", 0)
+    cons_old = diag.get("raw_consensus_old", 0)
+    cons_new = syn.get("panel_consensus", 0)
+
+    def _delta(old, new):
+        try:
+            d = new - old
+            if abs(d) < 0.05:
+                return ""
+            cls = "delta-up" if d > 0 else "delta-down"
+            sign = "+" if d > 0 else ""
+            return f' <span class="{cls}">({sign}{d:.1f})</span>'
+        except (TypeError, ValueError):
+            return ""
+
+    compare = (
+        f"fund {fund_old:.1f}→<strong>{fund_new:.1f}</strong>{_delta(fund_old, fund_new)} · "
+        f"panel {cons_old:.1f}→<strong>{cons_new:.1f}</strong>{_delta(cons_old, cons_new)}"
+    )
+
+    return f'''<div class="style-chip-wrap">
+  <span class="icon">🎯</span>
+  <span class="label">本股识别为</span>
+  <span class="value">{label}</span>
+  <span class="hint">{explanation}</span>
+  <span class="compare">{compare}</span>
+</div>'''
+
+
 def _render_data_gap_banner(data_gaps: dict | None) -> str:
     """v2.3 · Render orange banner listing data gaps. Returns empty string if no gaps.
 
@@ -2570,6 +2608,12 @@ def assemble(ticker: str) -> Path:
     template = template.replace(
         "<!-- INJECT_DATA_GAP_BANNER -->",
         _render_data_gap_banner(syn.get("data_gaps")),
+    )
+
+    # v2.7 · Style chip (动态加权说明，只在 detected_style 存在时渲染)
+    template = template.replace(
+        "<!-- INJECT_STYLE_CHIP -->",
+        _render_style_chip(syn),
     )
 
     date = datetime.now().strftime("%Y%m%d")
