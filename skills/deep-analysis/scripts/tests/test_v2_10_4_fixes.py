@@ -228,6 +228,21 @@ def test_coverage_critical_preserved_in_medium():
     assert issues[0].severity == "critical"
 
 
+def test_run_py_sets_cli_only_env():
+    """Fix (v2.10.5) · run.py is CLI direct entrypoint · should auto-set UZI_CLI_ONLY=1.
+
+    Agent flow calls stage1/stage2 directly; only humans/CI use run.py. So run.py
+    must tell self_review it's CLI-only so agent_analysis.json missing gets warning
+    (not critical that blocks HTML).
+    """
+    run_py = Path(__file__).resolve().parent.parent.parent.parent.parent / "run.py"
+    assert run_py.exists()
+    src = run_py.read_text(encoding="utf-8")
+    assert 'os.environ.setdefault("UZI_CLI_ONLY", "1")' in src, (
+        "run.py must set UZI_CLI_ONLY=1 so CLI direct runs produce HTML"
+    )
+
+
 def test_coverage_profile_aware_denominator():
     """Fix (v2.10.5) · denominator should exclude dims not in profile.
 

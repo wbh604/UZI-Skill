@@ -254,6 +254,11 @@ def main():
                         help="v2.10.2 · 思考深度 · lite(1-2min) / medium(5-8min · 默认) / deep(15-20min · 含 Bull-Bear 辩论 + Segmental)")
     args = parser.parse_args()
 
+    # v2.10.5 · run.py 是 CLI 直跑入口（agent 流程走 stage1/stage2 直接调用，不经 run.py）。
+    # 设 UZI_CLI_ONLY=1 让 self_review 对 agent_analysis.json 缺失 / 低 coverage 做宽容处理
+    # （降级为 warning，仍出报告）。
+    os.environ.setdefault("UZI_CLI_ONLY", "1")
+
     # v2.10.2 · 深度选择（优先级: --depth > UZI_DEPTH env > UZI_LITE env > 默认 medium）
     try:
         sys.path.insert(0, str(Path(__file__).parent / "skills" / "deep-analysis" / "scripts"))

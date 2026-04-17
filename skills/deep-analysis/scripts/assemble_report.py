@@ -1832,11 +1832,12 @@ def render_fund_managers(managers: list) -> str:
         trend_color = COLOR_BULL if trend == "加仓" else COLOR_BEAR if trend == "减仓" else COLOR_MUTED
         trend_icon = "📈" if trend == "加仓" else "📉" if trend == "减仓" else "➡️"
 
-        ret_5y = m.get("return_5y", 0)
-        ann_5y = m.get("annualized_5y", 0)
-        max_dd = m.get("max_drawdown", 0)
-        sharpe = m.get("sharpe", 0)
-        peer_rank = m.get("peer_rank_pct", 50)
+        # v2.10.5 · lite 档 fund_managers 前 N 个有完整业绩，其余只有列表信息 → 数值字段可为 None
+        ret_5y = m.get("return_5y") or 0
+        ann_5y = m.get("annualized_5y") or 0
+        max_dd = m.get("max_drawdown") or 0
+        sharpe = m.get("sharpe") or 0
+        peer_rank = m.get("peer_rank_pct") or 50
 
         nav = m.get("nav_history", [])
         nav_spark = svg_sparkline(nav, width=280, height=50, color=COLOR_BULL if nav and nav[-1] > nav[0] else COLOR_BEAR) if nav else ""

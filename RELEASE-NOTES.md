@@ -1,10 +1,12 @@
 # Release Notes
 
-## v2.10.5 — 2026-04-18 (coverage threshold profile-aware · v2.10.4 遗漏补丁)
+## v2.10.5 — 2026-04-18 (coverage threshold profile-aware + CLI 直跑 HTML 生成)
+
+> **本地真机测试发现 v2.10.4 还有 3 处漏修 · 一次性补完**
 
 > **Codex 跑 v2.10.4 真机测试再次反馈：lite 模式在网络差时仍被 self-review block**
 
-### Codex 测试发现的遗漏
+### 本地真机测试发现的 3 处遗漏
 
 v2.10.4 修了 `check_all_dims_exist` / `check_empty_dims` / `check_agent_analysis_exists` 三处，但漏了 **`check_coverage_threshold`**：
 
@@ -14,18 +16,37 @@ v2.10.4 修了 `check_all_dims_exist` / `check_empty_dims` / `check_agent_analys
 
 ### 修复
 
-`check_coverage_threshold` (lib/self_review.py) · 两处改动：
+**1. `check_coverage_threshold` profile-aware**（lib/self_review.py）
+- Profile-aware 分母 — 只算当前档位启用维度的 `CRITICAL_CHECKS` 项
+- CLI-only / lite 模式 `< 40%` 的 critical 降为 warning（CLI 直跑无 agent 可补数据）
 
-1. **Profile-aware 分母** — 只算当前档位启用维度的 `CRITICAL_CHECKS` 项
-2. **CLI-only / lite 模式降级** — `< 40%` 的 critical 降为 warning（CLI 直跑无 agent 可补数据，阻止 HTML 没意义，改为 warning 继续出报告供参考）
+**2. run.py 自动标记为 CLI 直跑**（run.py）
+- `run.py` 在 main() 开头设 `UZI_CLI_ONLY=1`
+- 理由：agent 流程走 stage1/stage2 直接调用，不经 run.py；run.py 只服务人/CI
+- 效果：medium/deep 模式下 CLI 直跑 `agent_analysis.json` 缺失也降为 warning，能出报告
+
+**3. `render_fund_managers` None 字段崩溃**（assemble_report.py:1844）
+- 症状：`TypeError: '>' not supported between 'NoneType' and 'int'`
+- 根因：v2.10.2 fund_holders 双层策略下，rest lite 基金的 `return_5y/max_drawdown/sharpe` 为 None，不是 0。`m.get("return_5y", 0)` 不能处理显式 None
+- 修：`m.get("return_5y") or 0` 统一兜底（5 个字段）
 
 ### 回归测试
 
-- 新增 3 个用例 · `test_v2_10_4_fixes.py`:
+- 新增 4 个用例 · `test_v2_10_4_fixes.py`:
   - `test_coverage_critical_downgrades_in_lite` — lite + 17% coverage → warning ✅
   - `test_coverage_critical_preserved_in_medium` — medium + 17% coverage → critical ✅ (回归护栏)
   - `test_coverage_profile_aware_denominator` — lite + 启用维度全满 → 0 issues ✅
-- 原 76 个 regression 全绿 → **79 passed**
+  - `test_run_py_sets_cli_only_env` — run.py 源码含 `UZI_CLI_ONLY=1` setdefault ✅
+- 原 76 个 regression 全绿 → **80 passed**
+
+### 真机验证（local）
+
+| 场景 | v2.10.4 | v2.10.5 |
+|---|---|---|
+| `run.py 600519.SH --depth lite` | ❌ critical block HTML | ✅ warning, HTML ~130s |
+| `run.py 002273.SZ --depth medium` | ❌ agent_analysis critical | ✅ warning, HTML ~60s (cached) |
+| `run.py 00700.HK --depth lite` | ✅ (恰好擦边过) | ✅ 稳 |
+| `run.py 512400.SH` (ETF) | ✅ 早退 | ✅ 早退，提示成分股 |
 
 ---
 
