@@ -12,7 +12,7 @@
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-17-red)]()
 [![Self-Review](https://img.shields.io/badge/Self--Review-13%20checks-blueviolet)](skills/deep-analysis/scripts/lib/self_review.py)
 
-A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.11 评分校准 + v2.10 三档思考深度 + Hermes 兼容**
+A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.13 Playwright 分级兜底 + v2.11 评分校准 + Hermes 兼容**
 
 [安装](#安装) · [用法](#用法) · [三档深度](#-三档思考深度v2103-新增) · [Hermes 🆕](INSTALL-HERMES.md) · [评审团](#-51-位评审团) · [机构方法](#-17-种机构级方法) · [自查 gate](#-机械级自查-gatev29-起) · [报告截图](#-报告长什么样) · [FAQ](#-faq) · [入群交流测试](#-测试交流群)
 
@@ -235,6 +235,7 @@ python run.py 600519
 | **ddgs 定性查询** | **全 skip**（省 token）| 按需 · 预算 30 次 | 跑满 · 预算 60 次 |
 | **fund_holders** | Top 5 完整业绩 | Top 20 完整 + 其余清单 | Top 100 完整 |
 | **自查 gate** | critical block | critical block · warning 可 ack | 两级都 block |
+| **Playwright 兜底**（v2.13.0 新增） | ❌ 完全禁用 | opt-in · `UZI_PLAYWRIGHT_ENABLE=1` · 4 维（4_peers/8_materials/15_events/17_sentiment） | ✅ 默认启用 · 5 维（medium 4 + 3_macro）· 首次 y/n 交互装 Chromium |
 | **Token 消耗（Codex）** | 最省 | 中等 | 最大 |
 | **适用场景** | 随手看 / 老板临时问 / 预判 ETF 成分股 | 日常深度分析 · 写研报 | 投委会备忘录 · 建仓前深挖 |
 
@@ -639,6 +640,8 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| **v2.13.0** | 2026-04-18 | **Playwright 通用兜底 · 按三档 profile 分级**：lite `off` / medium `opt-in` (4 维) / deep `default` (5 维 · 首次 y/n 自动装 Chromium)。新增 `lib/playwright_fallback.py` · 抽离 `lib/junk_filter.py` · 反爬合规原则（只抓官方权威页不抓 UGC）· Codex review 排除 7_industry/14_moat/13_policy/18_trap/19_contests · 21 专项测试 |
+| **v2.12.1** | 2026-04-18 | **4 个报告板块空数据/错数据修复**（中际旭创实测驱动）：4_peers 三层 fallback + 雪球 Playwright opt-in · 7_industry regex 上下文感知 · core_material 垃圾过滤 · BCG 真实算 market_share + 阈值调整 · 16 专项测试 |
 | **v2.12.0** | 2026-04-18 | **6 平台社交热榜聚合**：微博/知乎/百度/抖音/头条/B站 官方 API + 5min 文件缓存 + 单平台失败不影响其他 · `17_sentiment` 维度新增 `hot_trend_mentions` 字段补 DuckDuckGo 盲区 · 抄 jcp/hottrend 设计 · 17 个专项测试 |
 | **v2.11.0** | 2026-04-18 | **评分校准（用户反馈驱动）**：论坛+微信反馈"茅台 47 分"、"没超过 65 分" → verdict 阈值 `85/70/55/40 → 80/65/50/35`；consensus neutral 权重 `0.5 → 0.6`（A 股白马结构性偏低问题）；`stock_style` 同步对齐 |
 | **v2.10.7** | 2026-04-18 | **Codex 审查 3 处修复**：`raw.market` 硬编"A"污染 HK/US · `resume` 对别名输入失效（中文名/三位港股 cache 不命中）· AGENTS.md 强制全量流程与 CLI/lite 降载设计冲突 → 深浅两路径决策树 |

@@ -1,9 +1,58 @@
 # BUGS-LOG · 防回归记录
 
 每个 bug 修完都登记到这里。**未来改这些代码区域时，必须回看本文件确保不引入回归。**
-对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py` + `tests/test_v2_10_4_fixes.py` + `tests/test_v2_11_scoring_calibration.py` + `tests/test_v2_12_1_data_fixes.py`。
+对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py` + `tests/test_v2_10_4_fixes.py` + `tests/test_v2_11_scoring_calibration.py` + `tests/test_v2_12_1_data_fixes.py` + `tests/test_v2_13_playwright_strategy.py`。
 
 **登记规范**：每条必含 症状 / 位置 / 根因 / 影响 / 修法 / 验证 / 回归测试 / "未来改该区域注意事项"
+
+---
+
+## v2.13.0 (2026-04-18 · Playwright 通用兜底 · 按三档 profile 分级)
+
+### 改进 · Playwright fallback 通用化 + 按 profile 分级
+- **背景**：v2.12.1 给 `fetch_peers.py` 加了雪球 Playwright Tier 3。用户提出"所有爬不到数据的都用 Playwright + 自动装"。直接做全量会导致 lite 用户也要背 150MB Chromium，且某些维度（小红书/抖音/微博）反爬 + 合规风险大
+- **位置**：
+  - 新增 `lib/playwright_fallback.py`（~320 行）· 通用模块
+  - 新增 `lib/junk_filter.py` · 抽离 v2.12.1 的 `_is_junk_autofill`
+  - `lib/analysis_profile.py` · AnalysisProfile 加 `playwright_mode` + `playwright_dims` 字段
+  - `run_real_test.py:1750+` · 在 `_autofill_qualitative_via_mx` 之后调用
+- **策略**（Codex review 后收敛）：
+  | profile | playwright_mode | 覆盖维度 | 自动装行为 |
+  |---|---|---|---|
+  | lite | off | 无 | 不涉及（保持 30s-1min 快扫）|
+  | medium | opt-in · 需 `UZI_PLAYWRIGHT_ENABLE=1` | 4 维（4_peers/8_materials/15_events/17_sentiment） | 未装时打印命令让用户手动装，本次跳过 |
+  | deep | default 默认启用 | 5 维（medium 4 + 3_macro 官方权威） | 未装时 y/n 交互确认 → 同意自动装 → 失败 graceful degrade |
+- **Codex review 排除的维度**：
+  - `7_industry` → 百度搜索页信噪比差（保持 `search_trusted` site: 方案）
+  - `14_moat` → 百度百科质量差
+  - `13_policy` → `search_trusted` site: 限权威域已够
+  - `18_trap` → 小红书/抖音反爬严 + UGC 合规风险
+  - `19_contests` → `lib/xueqiu_browser` 已有专用登录路径
+- **自动装流程**：
+  1. 检测 `playwright` 包 + Chromium executable
+  2. deep `auto=True` → `_confirm_install_interactive()` y/n 询问
+  3. 同意 → `pip install playwright` 复用 `run.py::PYPI_MIRRORS` 清华/阿里云/中科大 fallback
+  4. `playwright install chromium` 下载 ~150 MB · stdout 可见
+  5. 任何环节失败 → 返 False · 调用方跳过 Playwright · **不阻塞主流程**
+- **反爬 / 合规原则**：
+  - 只抓官方权威页：`xueqiu.com/S/{sym}` public / `cninfo.com.cn` / `em.eastmoney.com` F10 / `stats.gov.cn`
+  - 每次请求随机 0.5-1.5s sleep
+  - 不抓 UGC 平台（小红书/抖音/微博）
+- **验证**：
+  - `is_playwright_enabled()` · lite False · medium opt-in + env True · deep 永远 True
+  - `ensure_playwright_installed(auto=False)` 未装不跑 subprocess · 只打印命令
+  - `ensure_playwright_installed(auto=True)` + user n → 不装 · 返 False
+  - `autofill_via_playwright` 尊重 `profile.playwright_dims` 白名单
+  - Playwright 返垃圾（"类型；类型"）被 `junk_filter` 过滤不写入
+- **回归测试**：`tests/test_v2_13_playwright_strategy.py` · 21 个用例
+  - 3 档 profile 字段检查 · `is_enabled` 三场景 · `ensure_installed` 5 种路径 · autofill 白名单 + 垃圾过滤 + 已有数据跳过 · `DIM_STRATEGIES` 5 维 · 排除维度护栏 · `junk_filter` 模块导出 · `run_real_test._is_junk_autofill` BC delegate
+  - 全 mock · 无真实浏览器依赖 · CI 可跑
+- **若未来改 Playwright 层**：
+  - **不能把 lite 的 playwright_mode 改为 opt-in/default**（lite 设计上就是快扫 · 加浏览器破坏档位语义）
+  - **不能静默自动装 Chromium**（150MB 下载用户必须知情 · deep 档已有 `_confirm_install_interactive`）
+  - **安装失败必须 graceful degrade**（不能 raise 阻塞主流程 · 现有 `try/except` 不能删）
+  - **不能把排除的 4 维（14_moat/13_policy/18_trap/19_contests/7_industry）加回 DIM_STRATEGIES 而不经 Codex 级 review**（反爬/合规/信噪比问题有先例）
+  - **BC 契约**：`run_real_test._is_junk_autofill` 必须保留（现 delegate 到 `lib/junk_filter`）· 老代码可能直接 import
 
 ---
 

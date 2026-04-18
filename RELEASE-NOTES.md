@@ -1,5 +1,81 @@
 # Release Notes
 
+## v2.13.0 — 2026-04-18 (Playwright 通用兜底 · 按三档 profile 分级)
+
+> **用户要求"所有爬不到数据的都用 Playwright + 自动装"。经 Codex 架构 review 后按现有三档深度分级制定策略 · 避免对轻量用户添加不必要开销**
+
+### 核心设计
+
+**按 AnalysisProfile 分级**（扩展 `playwright_mode` + `playwright_dims` 两个字段）：
+
+| profile | Playwright 模式 | 覆盖维度 | 自动装 Chromium |
+|---|---|---|---|
+| ⚡ **lite** (30s-1min) | `off` 完全禁用 | 无 | 不涉及 |
+| 📊 **medium** (2-4min) | `opt-in` · `UZI_PLAYWRIGHT_ENABLE=1` 启用 | **4 维**：`4_peers` / `8_materials` / `15_events` / `17_sentiment` | ❌ 打印命令让用户手动装 |
+| 🔬 **deep** (15-20min) | `default` 默认启用 | **5 维**：medium 4 维 + `3_macro` | ✅ 首次 y/n 交互确认后自动装 |
+
+### 新增模块
+
+**`lib/playwright_fallback.py`** (~320 行)：
+- `is_playwright_enabled()` · 按 profile 判断
+- `ensure_playwright_installed(auto)` · 分档装 · y/n 交互 · pypi 国内镜像 fallback
+- `fetch_url(url, wait_for, timeout)` · 通用 headless Chromium 抓取 · 随机 0.5-1.5s sleep 反风控
+- `DIM_STRATEGIES` · 5 维策略映射 (URL 模板 + parser)
+- `autofill_via_playwright(raw, ticker)` · post-fetch 兜底 · 类 `_autofill_qualitative_via_mx` 模式
+
+**`lib/junk_filter.py`** · 抽离 v2.12.1 `_is_junk_autofill` 共用（Playwright 抓回来的数据也走垃圾过滤）
+
+### Codex 架构 review 排除的维度
+
+经 Codex review 明确不加：
+- ❌ `7_industry` → 百度搜索页信噪比差（保持 `search_trusted` site: 权威域方案）
+- ❌ `14_moat` → 百度百科质量差
+- ❌ `13_policy` → `search_trusted` site: 限权威域已够
+- ❌ `18_trap` → 小红书/抖音反爬严 + UGC 合规风险
+- ❌ `19_contests` → `lib/xueqiu_browser` 已有专用登录路径
+
+这些放在 BUGS-LOG 的"未来改该区域注意事项"里作为契约：**不能不经 Codex review 就加回来**。
+
+### 自动装策略（deep 档）
+
+```
+deep 模式触发 → 检测 playwright + chromium
+  ├─ 已装 → 直接跑兜底
+  ├─ 未装 → 打印 "需要下载 ~180 MB，继续？(y/N)"
+  │    ├─ 用户 y → pip install (国内镜像 fallback) + playwright install chromium
+  │    │    ├─ 成功 → 继续
+  │    │    └─ 失败 → warning · 跳过 Playwright · 主流程不阻塞
+  │    └─ 用户 n/空 → 跳过 Playwright · 其他兜底仍跑
+  └─ 任何 exception → warning · 跳过
+```
+
+### 反爬 / 合规原则
+
+- 只抓官方权威页：`xueqiu.com/S/{sym}` public / `cninfo.com.cn` / `em.eastmoney.com` F10 / `stats.gov.cn`
+- 每次请求随机 `0.5-1.5s` sleep
+- **不抓 UGC 平台**（小红书/抖音/微博）· 这些放 17_sentiment 的 ddgs 链
+
+### 回归测试
+
+- 新增 `tests/test_v2_13_playwright_strategy.py` · **21 个用例**（全 mock · 零真实浏览器）
+  - 3 档 profile 字段 · `is_enabled` 三场景 · `ensure_installed` 5 路径（已装 / 未装 opt-in / 未装 deep y / 未装 deep n / chromium fail）
+  - `autofill` 白名单 / 垃圾过滤 / 已有数据跳过
+  - `DIM_STRATEGIES` 5 维 · 排除维度护栏 · `junk_filter` 模块 · BC delegate
+- 全量 **152 passed**（原 131 + 新 21）
+
+### 兼容性
+
+- v2.12.1 的 `_is_junk_autofill` 保留（delegate 到 `lib/junk_filter.is_junk_autofill_text`）· 老代码 import 不破
+- v2.12.1 的 `lib/xueqiu_browser.fetch_peers_via_browser` 保留 · 作为**登录态专用**路径（`UZI_XQ_LOGIN=1`）· 与新的通用 `fetch_url` 分工：
+  - 登录态 → xueqiu_browser（cookie 持久化 + F10 页深度抓）
+  - 匿名 → playwright_fallback.fetch_url（轻量 · 速度快）
+
+### 升级
+
+`git pull origin main` · 默认对 lite/medium 用户**零感知**（不装不跑）· deep 用户首次触发会看到 y/n 提示。
+
+---
+
 ## v2.12.1 — 2026-04-18 (4 个报告板块空数据 / 错数据修复)
 
 > **用户实测中际旭创（300308.SZ）发现 4 处 数据层 / 模型层 bug · 一次性 hotfix**

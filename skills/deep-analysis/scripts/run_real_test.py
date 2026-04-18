@@ -947,35 +947,24 @@ def _auto_summarize_dim(dim_key: str, label: str, dim: dict, score: float) -> st
     return f"{label}：{'、'.join(items) if items else '无数据'}。" if items else ""
 
 
-# v2.12.1 · MX/ddgs 返回垃圾数据的黑名单 · 模块级常量方便扩展
-_AUTOFILL_JUNK_PATTERNS = (
-    "类型；类型",           # MX prompt 残留（中际旭创实测）
-    "XXX", "TODO", "null", "undefined", "None",
-    "抱歉，", "无法回答", "我不知道", "不清楚", "暂无数据",
-    "（示例）", "（待补）",
-)
-
-
-def _is_junk_autofill(text: str) -> bool:
-    """v2.12.1 · 检测 MX/ddgs 兜底返回的噪音数据（不写进 data 字段）.
-
-    触发条件：
-    1. 长度 < 5 → 太短无意义
-    2. 命中黑名单短语（prompt 残留 / 模板占位符 / LLM 道歉）
-    3. 分号分隔全同（"类型；类型；类型"）
-    """
-    if not text:
-        return True
-    t = str(text).strip()
-    if len(t) < 5:
-        return True
-    if any(j in t for j in _AUTOFILL_JUNK_PATTERNS):
-        return True
-    # 分号分隔全同：如 "类型；类型"
-    parts = [p.strip() for p in t.split("；") if p.strip()]
-    if len(parts) >= 2 and len(set(parts)) == 1:
-        return True
-    return False
+# v2.12.1 · MX/ddgs 返回垃圾数据的黑名单
+# v2.13.0 · 抽到 lib/junk_filter.py 共用（Playwright 兜底也用）· 此处保留 BC delegate
+try:
+    from lib.junk_filter import JUNK_PATTERNS as _AUTOFILL_JUNK_PATTERNS, is_junk_autofill_text as _is_junk_autofill
+except ImportError:
+    # 兜底：旧环境直接内联定义（防止模块导入失败时整个文件崩）
+    _AUTOFILL_JUNK_PATTERNS = (
+        "类型；类型", "XXX", "TODO", "null", "undefined", "None",
+        "抱歉，", "无法回答", "我不知道", "不清楚", "暂无数据",
+        "（示例）", "（待补）",
+    )
+    def _is_junk_autofill(text):
+        if not text: return True
+        t = str(text).strip()
+        if len(t) < 5: return True
+        if any(j in t for j in _AUTOFILL_JUNK_PATTERNS): return True
+        parts = [p.strip() for p in t.split("；") if p.strip()]
+        return len(parts) >= 2 and len(set(parts)) == 1
 
 
 def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
@@ -1761,6 +1750,18 @@ def stage1(ticker: str) -> dict:
         write_task_output(ti.full, "raw_data", raw)  # 持久化补齐后的数据
     except Exception as _af_e:
         print(f"   ⚠️ 自动兜底异常: {type(_af_e).__name__}: {str(_af_e)[:120]}")
+
+    # v2.13.0 · Playwright 最后一层兜底（按 profile 决策 · lite 自动跳过 · deep 默认启用 + y/n 装）
+    # lite: 完全禁用 · medium: opt-in (UZI_PLAYWRIGHT_ENABLE=1) · deep: 默认启用（未装 y/n 确认装）
+    try:
+        from lib.playwright_fallback import autofill_via_playwright, is_playwright_enabled
+        if is_playwright_enabled():
+            print("\n🎭 v2.13.0 · Playwright 兜底（按 profile 策略）...")
+            _pw_summary = autofill_via_playwright(raw, ti.full)
+            if _pw_summary.get("succeeded", 0) > 0:
+                write_task_output(ti.full, "raw_data", raw)
+    except Exception as _pwe:
+        print(f"   ⚠️ Playwright 兜底异常（跳过，不阻塞主流程）: {type(_pwe).__name__}: {str(_pwe)[:120]}")
 
     print("\n🏛  Task 1.5 · 机构级财务建模 (Dims 20-22)")
     from compute_deep_methods import compute_dim_20, compute_dim_21, compute_dim_22

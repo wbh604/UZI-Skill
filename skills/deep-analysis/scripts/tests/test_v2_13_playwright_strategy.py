@@ -1,0 +1,337 @@
+"""Regression tests for v2.13.0 · Playwright 分级兜底策略.
+
+按三档 AnalysisProfile:
+- lite: playwright_mode='off' · 永远禁用
+- medium: playwright_mode='opt-in' · UZI_PLAYWRIGHT_ENABLE=1 才启用 · 未装只打命令
+- deep: playwright_mode='default' · 自动启用 · 未装 y/n 交互装
+
+全测试 mock 真实 Playwright · 零真实浏览器依赖.
+"""
+from __future__ import annotations
+
+import importlib
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+import pytest
+
+SCRIPTS = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SCRIPTS))
+
+
+def _reset_env():
+    for k in ("UZI_DEPTH", "UZI_LITE", "UZI_PLAYWRIGHT_ENABLE"):
+        os.environ.pop(k, None)
+
+
+def _reload_all():
+    """重新加载 profile + playwright_fallback（env 变动后）."""
+    import lib.analysis_profile as ap
+    import lib.playwright_fallback as pf
+    importlib.reload(ap)
+    importlib.reload(pf)
+    return ap, pf
+
+
+# ─── Profile 字段三档默认值 ──────────────────────────────────────
+
+def test_profile_has_playwright_fields():
+    """AnalysisProfile 必须有 playwright_mode + playwright_dims 字段."""
+    _reset_env()
+    ap, _ = _reload_all()
+    for depth in ("lite", "medium", "deep"):
+        p = ap.get_profile(depth)
+        assert hasattr(p, "playwright_mode"), f"{depth} profile 缺 playwright_mode"
+        assert hasattr(p, "playwright_dims"), f"{depth} profile 缺 playwright_dims"
+
+
+def test_lite_profile_disables_playwright():
+    _reset_env()
+    ap, _ = _reload_all()
+    p = ap.get_profile("lite")
+    assert p.playwright_mode == "off"
+    assert p.playwright_dims == frozenset()
+
+
+def test_medium_profile_opt_in():
+    _reset_env()
+    ap, _ = _reload_all()
+    p = ap.get_profile("medium")
+    assert p.playwright_mode == "opt-in"
+    # 4 维：4_peers / 8_materials / 15_events / 17_sentiment
+    assert len(p.playwright_dims) == 4
+    assert "4_peers" in p.playwright_dims
+    assert "8_materials" in p.playwright_dims
+    # 确认 Codex review 后砍掉的维度不在里面
+    assert "7_industry" not in p.playwright_dims
+    assert "14_moat" not in p.playwright_dims
+    assert "13_policy" not in p.playwright_dims
+
+
+def test_deep_profile_default_on():
+    _reset_env()
+    ap, _ = _reload_all()
+    p = ap.get_profile("deep")
+    assert p.playwright_mode == "default"
+    # 5 维：medium 4 + 3_macro
+    assert len(p.playwright_dims) == 5
+    assert "3_macro" in p.playwright_dims
+    # 明确不包含反爬/合规风险的维度
+    assert "18_trap" not in p.playwright_dims
+    assert "19_contests" not in p.playwright_dims
+
+
+# ─── is_playwright_enabled 三档行为 ───────────────────────────────
+
+def test_is_enabled_false_in_lite():
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "lite"
+    _, pf = _reload_all()
+    assert pf.is_playwright_enabled() is False
+
+
+def test_is_enabled_false_in_medium_without_env():
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "medium"
+    _, pf = _reload_all()
+    assert pf.is_playwright_enabled() is False
+
+
+def test_is_enabled_true_in_medium_with_env():
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "medium"
+    os.environ["UZI_PLAYWRIGHT_ENABLE"] = "1"
+    _, pf = _reload_all()
+    assert pf.is_playwright_enabled() is True
+    _reset_env()
+
+
+def test_is_enabled_true_in_deep_always():
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "deep"
+    _, pf = _reload_all()
+    # deep 永远 True · 不需要 env
+    assert pf.is_playwright_enabled() is True
+    _reset_env()
+
+
+# ─── ensure_playwright_installed 安装策略 ─────────────────────────
+
+def test_ensure_installed_returns_true_if_all_present():
+    """playwright 包 + chromium 都装了 → 直接 True，不跑 pip."""
+    _reset_env()
+    _, pf = _reload_all()
+    with patch.object(pf, "_is_playwright_pkg_installed", return_value=True), \
+         patch.object(pf, "_is_chromium_installed", return_value=True):
+        assert pf.ensure_playwright_installed(auto=False) is True
+        assert pf.ensure_playwright_installed(auto=True) is True
+
+
+def test_ensure_installed_non_auto_only_prints_hint():
+    """medium opt-in 模式：未装时只打印命令，不跑 subprocess."""
+    _reset_env()
+    _, pf = _reload_all()
+    with patch.object(pf, "_is_playwright_pkg_installed", return_value=False), \
+         patch.object(pf, "_is_chromium_installed", return_value=False), \
+         patch.object(pf, "_pip_install_playwright") as mock_pip, \
+         patch.object(pf, "_install_chromium_browser") as mock_chr:
+        result = pf.ensure_playwright_installed(auto=False)
+        assert result is False
+        mock_pip.assert_not_called()  # 不自动跑 pip
+        mock_chr.assert_not_called()
+
+
+def test_ensure_installed_auto_mode_calls_pip_and_chromium():
+    """deep default 模式：未装时交互确认后自动装."""
+    _reset_env()
+    _, pf = _reload_all()
+    with patch.object(pf, "_is_playwright_pkg_installed", side_effect=[False, True, True]), \
+         patch.object(pf, "_is_chromium_installed", side_effect=[False, False, True]), \
+         patch.object(pf, "_confirm_install_interactive", return_value=True) as mock_confirm, \
+         patch.object(pf, "_pip_install_playwright", return_value=True) as mock_pip, \
+         patch.object(pf, "_install_chromium_browser", return_value=True) as mock_chr:
+        result = pf.ensure_playwright_installed(auto=True)
+        assert result is True
+        mock_confirm.assert_called_once()
+        mock_pip.assert_called_once()
+        mock_chr.assert_called_once()
+
+
+def test_ensure_installed_respects_user_decline():
+    """用户 y/n 选 n → 跳过安装，返 False · 不 raise."""
+    _reset_env()
+    _, pf = _reload_all()
+    with patch.object(pf, "_is_playwright_pkg_installed", return_value=False), \
+         patch.object(pf, "_is_chromium_installed", return_value=False), \
+         patch.object(pf, "_confirm_install_interactive", return_value=False), \
+         patch.object(pf, "_pip_install_playwright") as mock_pip:
+        result = pf.ensure_playwright_installed(auto=True)
+        assert result is False
+        mock_pip.assert_not_called()  # 用户拒绝了
+
+
+def test_ensure_installed_graceful_on_chromium_failure():
+    """chromium 下载失败 → 返 False · 不 raise."""
+    _reset_env()
+    _, pf = _reload_all()
+    with patch.object(pf, "_is_playwright_pkg_installed", return_value=True), \
+         patch.object(pf, "_is_chromium_installed", return_value=False), \
+         patch.object(pf, "_confirm_install_interactive", return_value=True), \
+         patch.object(pf, "_install_chromium_browser", return_value=False):
+        result = pf.ensure_playwright_installed(auto=True)
+        assert result is False
+
+
+# ─── autofill_via_playwright 核心行为 ───────────────────────────
+
+def test_autofill_skipped_when_disabled():
+    """is_playwright_enabled False → autofill 立刻返 · 不跑任何 strategy."""
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "lite"
+    _, pf = _reload_all()
+    raw = {"dimensions": {"4_peers": {"data": {}}}}
+    summary = pf.autofill_via_playwright(raw, "300308.SZ")
+    assert summary["enabled"] is False
+    assert summary["attempted"] == 0
+
+
+def test_autofill_respects_dim_whitelist():
+    """只对 profile.playwright_dims 里的 dim 尝试 · 其他 dim 跳过.
+
+    medium profile.playwright_dims = {4_peers, 8_materials, 15_events, 17_sentiment}.
+    确认 14_moat / 99_nonexistent / 7_industry (都不在白名单) 不被调用。
+    用空 dict strategies 避免真实网络调用。
+    """
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "medium"
+    os.environ["UZI_PLAYWRIGHT_ENABLE"] = "1"
+    _, pf = _reload_all()
+
+    called_dims = []
+
+    def tracking_strategy(ticker, raw):
+        called_dims.append(ticker)
+        return None  # 不产生数据 · attempted++ 但 succeeded 不增
+
+    # 全部 5 个策略都 mock 成 tracking · 避免真实网络
+    mocked_strategies = {k: tracking_strategy for k in pf.DIM_STRATEGIES.keys()}
+
+    with patch.object(pf, "ensure_playwright_installed", return_value=True), \
+         patch.dict(pf.DIM_STRATEGIES, mocked_strategies, clear=True):
+        # raw 里同时放白名单内 + 白名单外的 dim
+        raw = {
+            "dimensions": {
+                "4_peers":      {"data": {}},   # 白名单内
+                "8_materials":  {"data": {}},   # 白名单内
+                "15_events":    {"data": {}},   # 白名单内
+                "17_sentiment": {"data": {}},   # 白名单内
+                "14_moat":      {"data": {}},   # 白名单外 (不应被调)
+                "3_macro":      {"data": {}},   # deep 才在白名单 · medium 外 (不应被调)
+                "99_nonexistent": {"data": {}}, # 未知 dim (不应被调)
+            }
+        }
+        summary = pf.autofill_via_playwright(raw, "300308.SZ")
+    # medium 白名单 4 维 · 都有空 data · 都应 attempted
+    # 14_moat / 3_macro / 99_nonexistent 都在白名单外 · 不调
+    assert summary["attempted"] == 4
+    assert len(called_dims) == 4
+    _reset_env()
+
+
+def test_autofill_filters_junk_results():
+    """Playwright parser 返回垃圾数据 → is_junk_autofill 过滤 · 不写入 data."""
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "deep"
+    _, pf = _reload_all()
+
+    def junk_strategy(ticker, raw):
+        return {"core_business": "类型；类型"}  # 已知垃圾模式
+
+    # clear=True 只保留 8_materials · 避免其他 strategy 出真实网络
+    with patch.object(pf, "ensure_playwright_installed", return_value=True), \
+         patch.dict(pf.DIM_STRATEGIES, {"8_materials": junk_strategy}, clear=True):
+        raw = {"dimensions": {"8_materials": {"data": {}}}}
+        summary = pf.autofill_via_playwright(raw, "300308.SZ")
+    # 垃圾被过滤 · data 不应被写入
+    assert "core_business" not in raw["dimensions"]["8_materials"]["data"]
+    assert summary["failed"] >= 1
+    _reset_env()
+
+
+def test_autofill_skips_dim_with_existing_data():
+    """已有充足真实数据的 dim 不应被 Playwright 覆盖."""
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "deep"
+    _, pf = _reload_all()
+
+    called = []
+
+    def tracking_strategy(ticker, raw):
+        called.append(ticker)
+        return {"x": "data"}
+
+    # clear=True 避免其他 deep 白名单 dim 走真实网络
+    with patch.object(pf, "ensure_playwright_installed", return_value=True), \
+         patch.dict(pf.DIM_STRATEGIES, {"4_peers": tracking_strategy}, clear=True):
+        # peer_table 已有 5 条真实数据 · 不需要兜底
+        raw = {
+            "dimensions": {
+                "4_peers": {
+                    "data": {
+                        "peer_table": [{"a": 1}, {"b": 2}],
+                        "peer_comparison": [{"c": 3}],
+                        "rank": "1/50",
+                        "industry": "光模块",
+                    },
+                    "fallback": False,
+                },
+            }
+        }
+        pf.autofill_via_playwright(raw, "300308.SZ")
+    # 4_peers 有数据 · 不触发 strategy
+    assert called == [], f"已有数据的 dim 不应被重抓，但 strategy 被调用 {len(called)} 次"
+    _reset_env()
+
+
+# ─── DIM_STRATEGIES 稳定性 ──────────────────────────────────────
+
+def test_dim_strategies_has_5_entries():
+    """post-Codex review · 策略表应该只有 5 维."""
+    _reset_env()
+    _, pf = _reload_all()
+    assert len(pf.DIM_STRATEGIES) == 5
+    expected = {"4_peers", "8_materials", "15_events", "17_sentiment", "3_macro"}
+    assert set(pf.DIM_STRATEGIES.keys()) == expected
+
+
+def test_excluded_dims_not_in_strategies():
+    """明确排除的维度不在 DIM_STRATEGIES · 护栏."""
+    _reset_env()
+    _, pf = _reload_all()
+    excluded = ("7_industry", "14_moat", "13_policy", "18_trap", "19_contests")
+    for d in excluded:
+        assert d not in pf.DIM_STRATEGIES, (
+            f"{d} 已被 Codex review 明确排除（反爬/合规/信噪比差）"
+        )
+
+
+# ─── junk_filter 模块 ────────────────────────────────────────────
+
+def test_junk_filter_module_exports_pattern_and_fn():
+    """lib/junk_filter.py 必须导出 JUNK_PATTERNS 和 is_junk_autofill_text."""
+    from lib import junk_filter
+    assert hasattr(junk_filter, "JUNK_PATTERNS")
+    assert hasattr(junk_filter, "is_junk_autofill_text")
+    assert junk_filter.is_junk_autofill_text("类型；类型") is True
+    assert junk_filter.is_junk_autofill_text("真实分析内容") is False
+
+
+def test_run_real_test_still_has_backward_compat_delegate():
+    """run_real_test.py::_is_junk_autofill 保留 BC delegate."""
+    import run_real_test
+    importlib.reload(run_real_test)
+    # _is_junk_autofill 应仍可调用（delegate 到 junk_filter）
+    assert run_real_test._is_junk_autofill("类型；类型") is True
+    assert run_real_test._is_junk_autofill("真实光模块原材料：光芯片 PCB") is False

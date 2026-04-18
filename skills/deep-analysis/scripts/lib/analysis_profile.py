@@ -83,10 +83,31 @@ class AnalysisProfile:
     # warning 是否也 block HTML 生成
     self_review_block_warnings: bool
 
+    # === v2.13.0 · Playwright 兜底层 ===
+    # Playwright 通用兜底策略 · 按三档分级
+    #   'off'      → 完全禁用（lite · 保持快扫）
+    #   'opt-in'   → UZI_PLAYWRIGHT_ENABLE=1 / --enable-playwright 才启用（medium）
+    #               · 未装时打印安装命令，本次跳过（不自动装）
+    #   'default'  → 默认启用（deep · 用户选 deep 已同意深挖）
+    #               · 未装时交互式询问 y/n，同意后自动装
+    playwright_mode: str = "off"
+
+    # 本档启用 Playwright 兜底时覆盖的维度白名单
+    # 只对这些维度在主链失败后尝试浏览器抓取
+    playwright_dims: frozenset[str] = frozenset()
+
 
 # ═══════════════════════════════════════════════════════════════
 # Profile 定义
 # ═══════════════════════════════════════════════════════════════
+
+# v2.13.0 · Playwright 兜底覆盖的维度（按档位）
+# medium opt-in · 4 维最痛（Codex review 后砍掉 7_industry · 百度搜索信噪比差）
+_PLAYWRIGHT_MEDIUM_DIMS = frozenset({"4_peers", "8_materials", "15_events", "17_sentiment"})
+# deep default · medium 4 维 + 3_macro（stats.gov.cn 官方页 · 权威且无反爬）
+# 注：Codex review 后明确排除 14_moat（百度百科质量差）/ 13_policy（ddgs site: 够用）/
+#     18_trap（小红书抖音反爬+UGC 合规）/ 19_contests（UZI_XQ_LOGIN 专用路径已有）
+_PLAYWRIGHT_DEEP_DIMS = _PLAYWRIGHT_MEDIUM_DIMS | frozenset({"3_macro"})
 
 _CORE_FETCHERS = frozenset({
     "0_basic", "1_financials", "2_kline",
@@ -117,6 +138,8 @@ _PROFILES: dict[str, AnalysisProfile] = {
         fund_lite_list_enabled=False,    # 不展开全量清单
         require_qualitative_deep_dive=False,
         self_review_block_warnings=False,
+        playwright_mode="off",             # v2.13.0 · 保持 lite 快扫 · 不用浏览器
+        playwright_dims=frozenset(),
     ),
     DEPTH_MEDIUM: AnalysisProfile(
         depth=DEPTH_MEDIUM,
@@ -139,6 +162,8 @@ _PROFILES: dict[str, AnalysisProfile] = {
         fund_lite_list_enabled=True,
         require_qualitative_deep_dive=True,
         self_review_block_warnings=False,
+        playwright_mode="opt-in",          # v2.13.0 · UZI_PLAYWRIGHT_ENABLE=1 启用 · 未装时提示命令
+        playwright_dims=_PLAYWRIGHT_MEDIUM_DIMS,
     ),
     DEPTH_DEEP: AnalysisProfile(
         depth=DEPTH_DEEP,
@@ -162,6 +187,8 @@ _PROFILES: dict[str, AnalysisProfile] = {
         fund_lite_list_enabled=True,
         require_qualitative_deep_dive=True,
         self_review_block_warnings=True,   # ← deep: warning 也 block
+        playwright_mode="default",         # v2.13.0 · 默认启用 · 未装时 y/n 交互确认
+        playwright_dims=_PLAYWRIGHT_DEEP_DIMS,
     ),
 }
 
