@@ -235,7 +235,7 @@ python run.py 600519
 | **ddgs 定性查询** | **全 skip**（省 token）| 按需 · 预算 30 次 | 跑满 · 预算 60 次 |
 | **fund_holders** | Top 5 完整业绩 | Top 20 完整 + 其余清单 | Top 100 完整 |
 | **自查 gate** | critical block | critical block · warning 可 ack | 两级都 block |
-| **Playwright 兜底**（v2.13.0 新增） | ❌ 完全禁用 | opt-in · `UZI_PLAYWRIGHT_ENABLE=1` · 4 维（4_peers/8_materials/15_events/17_sentiment） | ✅ 默认启用 · 5 维（medium 4 + 3_macro）· 首次 y/n 交互装 Chromium |
+| **Playwright 兜底**（v2.13.1） | ❌ 完全禁用 | opt-in · `UZI_PLAYWRIGHT_ENABLE=1` · **6 维**（4_peers/8_materials/15_events/17_sentiment/7_industry/14_moat） | ✅ 默认启用 · **10 维**（medium 6 + 3_macro/13_policy/18_trap/19_contests）· 首次 y/n 交互装 Chromium |
 | **Token 消耗（Codex）** | 最省 | 中等 | 最大 |
 | **适用场景** | 随手看 / 老板临时问 / 预判 ETF 成分股 | 日常深度分析 · 写研报 | 投委会备忘录 · 建仓前深挖 |
 
@@ -640,7 +640,8 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
-| **v2.13.0** | 2026-04-18 | **Playwright 通用兜底 · 按三档 profile 分级**：lite `off` / medium `opt-in` (4 维) / deep `default` (5 维 · 首次 y/n 自动装 Chromium)。新增 `lib/playwright_fallback.py` · 抽离 `lib/junk_filter.py` · 反爬合规原则（只抓官方权威页不抓 UGC）· Codex review 排除 7_industry/14_moat/13_policy/18_trap/19_contests · 21 专项测试 |
+| **v2.13.1** | 2026-04-18 | **Playwright 全 10 维覆盖**（开源研究场景扩展）：v2.13.0 Codex 保守排除的 5 维（7_industry 百度搜索 / 14_moat 百度百科 / 13_policy 证监会 / 18_trap 小红书 / 19_contests 雪球组合）全部加回 · medium 4→6 维 · deep 5→10 维 · 22 专项测试 |
+| **v2.13.0** | 2026-04-18 | **Playwright 通用兜底 · 按三档 profile 分级**：lite `off` / medium `opt-in` (4 维) / deep `default` (5 维 · 首次 y/n 自动装 Chromium)。新增 `lib/playwright_fallback.py` · 抽离 `lib/junk_filter.py` |
 | **v2.12.1** | 2026-04-18 | **4 个报告板块空数据/错数据修复**（中际旭创实测驱动）：4_peers 三层 fallback + 雪球 Playwright opt-in · 7_industry regex 上下文感知 · core_material 垃圾过滤 · BCG 真实算 market_share + 阈值调整 · 16 专项测试 |
 | **v2.12.0** | 2026-04-18 | **6 平台社交热榜聚合**：微博/知乎/百度/抖音/头条/B站 官方 API + 5min 文件缓存 + 单平台失败不影响其他 · `17_sentiment` 维度新增 `hot_trend_mentions` 字段补 DuckDuckGo 盲区 · 抄 jcp/hottrend 设计 · 17 个专项测试 |
 | **v2.11.0** | 2026-04-18 | **评分校准（用户反馈驱动）**：论坛+微信反馈"茅台 47 分"、"没超过 65 分" → verdict 阈值 `85/70/55/40 → 80/65/50/35`；consensus neutral 权重 `0.5 → 0.6`（A 股白马结构性偏低问题）；`stock_style` 同步对齐 |

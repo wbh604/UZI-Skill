@@ -339,13 +339,134 @@ def _strategy_3_macro(ticker: str, raw: dict) -> dict | None:
     return {"macro_headlines_playwright": clean} if clean else None
 
 
-# 维度 → 策略映射（post-Codex review · 5 个精选）
+def _strategy_7_industry(ticker: str, raw: dict) -> dict | None:
+    """7_industry · 百度搜索行业景气度 · 抓第一页 snippet."""
+    # 从 raw 取行业名
+    basic = ((raw.get("dimensions") or {}).get("0_basic") or {}).get("data") or {}
+    industry = basic.get("industry", "") or ""
+    if not industry:
+        return None
+    import urllib.parse
+    q = urllib.parse.quote(f"{industry} 行业景气度 增速 市场规模 2026")
+    url = f"https://www.baidu.com/s?wd={q}"
+    html = fetch_url(url, timeout=15)
+    if not html:
+        return None
+    # 百度搜索结果用 <h3> 标题包装 · 抓最多 10 条
+    titles = re.findall(r'<h3[^>]*>\s*<a[^>]*>([^<]{5,80})</a>', html)
+    # 抓 body 片段（第一页结果的描述）
+    descs = re.findall(r'<span class="content-right_[^"]*">([^<]{10,200})</span>', html)
+    if not titles and not descs:
+        return None
+    return {
+        "baidu_search_titles_playwright": [t.strip() for t in titles[:10]],
+        "baidu_search_descs_playwright": [d.strip() for d in descs[:5]],
+    }
+
+
+def _strategy_14_moat(ticker: str, raw: dict) -> dict | None:
+    """14_moat · 百度百科公司词条 · 抓公司简介/主营/竞争优势字段."""
+    basic = ((raw.get("dimensions") or {}).get("0_basic") or {}).get("data") or {}
+    name = basic.get("name", "") or ""
+    if not name or len(name) < 2:
+        return None
+    import urllib.parse
+    url = f"https://baike.baidu.com/item/{urllib.parse.quote(name)}"
+    html = fetch_url(url, timeout=15)
+    if not html:
+        return None
+    # 百度百科用 .basicInfo-item / .lemmaWgt-lemmaTitle-title · 抽公司简介段
+    intro_match = re.search(r'<div class="lemma-summary[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
+    intro = ""
+    if intro_match:
+        # 去 HTML tag
+        intro = re.sub(r'<[^>]+>', '', intro_match.group(1)).strip()[:500]
+    # 抽基础信息栏（主营/注册资本/行业等）
+    info_pairs = re.findall(
+        r'<dt[^>]*class="basicInfo-item[^"]*">([^<]+)</dt>\s*<dd[^>]*class="basicInfo-item[^"]*">([^<]+)</dd>',
+        html,
+    )
+    info = {re.sub(r'\s+', '', k): v.strip()[:100] for k, v in info_pairs[:10]}
+    if not intro and not info:
+        return None
+    return {
+        "baike_intro_playwright": intro,
+        "baike_basic_info_playwright": info,
+    }
+
+
+def _strategy_13_policy(ticker: str, raw: dict) -> dict | None:
+    """13_policy · 证监会 csrc.gov.cn 新闻动态 · 抓最新政策标题."""
+    url = "http://www.csrc.gov.cn/csrc/c100028/common_list.shtml"
+    html = fetch_url(url, timeout=15)
+    if not html:
+        return None
+    # 证监会 HTML 用 <li> + <a> 结构
+    titles = re.findall(r'<a[^>]*title="([^"]{10,100})"', html)
+    if not titles:
+        titles = re.findall(r'<a[^>]*>([^<]{10,80})</a>', html)
+    # 过滤纯 nav 菜单
+    clean = [t.strip() for t in titles if not t.strip().isdigit() and "首页" not in t][:15]
+    return {"csrc_policy_titles_playwright": clean} if clean else None
+
+
+def _strategy_18_trap(ticker: str, raw: dict) -> dict | None:
+    """18_trap · 小红书搜索 · 查股票名是否被"老师"/"推荐"包装."""
+    basic = ((raw.get("dimensions") or {}).get("0_basic") or {}).get("data") or {}
+    name = basic.get("name", "") or ""
+    if not name or len(name) < 2:
+        return None
+    import urllib.parse
+    # 小红书搜索 + "老师带" / "推荐" 触发词
+    q = urllib.parse.quote(f"{name} 老师 推荐")
+    url = f"https://www.xiaohongshu.com/search_result?keyword={q}"
+    html = fetch_url(url, timeout=15)
+    if not html:
+        return None
+    # 小红书帖子 title
+    titles = re.findall(r'"title":"([^"]{5,80})"', html)
+    # 命中数（多则风险高）
+    clean = [t for t in titles if name in t or "推荐" in t or "老师" in t][:10]
+    return {
+        "xhs_trap_post_count_playwright": len(clean),
+        "xhs_trap_titles_playwright": clean,
+    } if clean else None
+
+
+def _strategy_19_contests(ticker: str, raw: dict) -> dict | None:
+    """19_contests · 雪球实盘组合排行榜 · 抓前 10 收益组合."""
+    # 雪球组合排行榜（公开，不需要登录）
+    url = "https://xueqiu.com/cube/rank/list"
+    html = fetch_url(url, timeout=15)
+    if not html:
+        return None
+    # 组合项 JSON 嵌入 HTML · 抽 name + total_gain
+    items = re.findall(
+        r'"name":"([^"]{3,40})"[^}]*?"total_gain":([\-\d.]+)',
+        html,
+    )
+    if not items:
+        return None
+    top10 = [
+        {"name": name, "total_gain_pct": float(gain) if gain else 0}
+        for name, gain in items[:10]
+    ]
+    return {"xueqiu_contest_top10_playwright": top10}
+
+
+# 维度 → 策略映射（v2.13.1 · 全 10 维 · 开源研究不受反爬合规限制）
 DIM_STRATEGIES: dict[str, Callable] = {
     "4_peers":       _strategy_4_peers,
     "8_materials":   _strategy_8_materials,
     "15_events":     _strategy_15_events,
     "17_sentiment":  _strategy_17_sentiment,
     "3_macro":       _strategy_3_macro,
+    # v2.13.1 新增（v2.13.0 Codex review 因反爬合规担心暂排除，用户明确开源研究场景不受限，加回）
+    "7_industry":    _strategy_7_industry,
+    "14_moat":       _strategy_14_moat,
+    "13_policy":     _strategy_13_policy,
+    "18_trap":       _strategy_18_trap,
+    "19_contests":   _strategy_19_contests,
 }
 
 

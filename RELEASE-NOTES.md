@@ -1,5 +1,55 @@
 # Release Notes
 
+## v2.13.1 — 2026-04-18 (Playwright 全 10 维覆盖 · 开源研究场景扩展)
+
+> **用户明确本项目是开源研究场景，反爬/合规不受限制**。v2.13.0 Codex review 为保守起见排除了 5 维，本版全部加回。
+
+### 策略调整
+
+| 维度 | v2.13.0 状态 | v2.13.1 状态 | 目标页 |
+|---|---|---|---|
+| 4_peers | ✅ medium+deep | ✅ medium+deep (不变) | 雪球 `/S/{sym}` |
+| 8_materials | ✅ medium+deep | ✅ medium+deep (不变) | 东财 F10 |
+| 15_events | ✅ medium+deep | ✅ medium+deep (不变) | cninfo 公告 |
+| 17_sentiment | ✅ medium+deep | ✅ medium+deep (不变) | 雪球讨论区 |
+| 3_macro | ✅ deep-only | ✅ deep-only (不变) | stats.gov.cn |
+| **7_industry** | ❌ 排除 | ✅ **medium+deep** | 百度搜索 `{行业}+景气度` |
+| **14_moat** | ❌ 排除 | ✅ **medium+deep** | 百度百科公司词条 |
+| **13_policy** | ❌ 排除 | ✅ **deep** | 证监会 csrc.gov.cn |
+| **18_trap** | ❌ 排除 | ✅ **deep** | 小红书搜索 `{name}+老师+推荐` |
+| **19_contests** | ❌ 排除 | ✅ **deep** | 雪球实盘组合排行榜 |
+
+### 三档维度扩展
+
+| profile | v2.13.0 | v2.13.1 |
+|---|---|---|
+| ⚡ lite | 0 维 off | 0 维 off (不变) |
+| 📊 medium | 4 维 opt-in | **6 维** opt-in（加 7_industry + 14_moat） |
+| 🔬 deep | 5 维 default | **10 维** default（全覆盖）|
+
+### 新增 5 个 parser（`lib/playwright_fallback.py`）
+
+- `_strategy_7_industry` · 百度搜索 `{行业} 行业景气度 增速 市场规模` · 抓 `<h3>` 标题 + `.content-right` 描述
+- `_strategy_14_moat` · 百度百科 `/item/{公司名}` · 抓 `.lemma-summary` 简介 + `.basicInfo-item` 信息栏
+- `_strategy_13_policy` · 证监会 `csrc.gov.cn/common_list.shtml` · 抓政策动态标题列表
+- `_strategy_18_trap` · 小红书 `xiaohongshu.com/search_result` · 搜 `{name} 老师 推荐` · 命中数作杀猪盘信号
+- `_strategy_19_contests` · 雪球 `xueqiu.com/cube/rank/list` · 抓组合排行 JSON · 提取 name + total_gain
+
+### 回归测试
+
+- 更新 `tests/test_v2_13_playwright_strategy.py` · 22 个用例
+- `test_dim_strategies_has_5_entries` → `test_dim_strategies_has_10_entries`
+- 移除 `test_excluded_dims_not_in_strategies`（不再排除）
+- 新增 `test_all_parsers_callable_and_return_none_on_empty_html` · 10 个 parser 都验证 fetch_url 返 None 时 graceful 返 None
+- 新增 `test_medium_dims_subset_of_deep` · 护栏：medium 必须是 deep 的子集
+- 全量 **153 passed**（v2.13.0 152 + 新 1）
+
+### BUGS-LOG 契约修订
+
+v2.13.0 BUGS-LOG 里关于"不能不经 Codex review 就加回排除维度"的契约作废 · 本版明确用户场景是开源研究不受合规限制 · 直接加回。
+
+---
+
 ## v2.13.0 — 2026-04-18 (Playwright 通用兜底 · 按三档 profile 分级)
 
 > **用户要求"所有爬不到数据的都用 Playwright + 自动装"。经 Codex 架构 review 后按现有三档深度分级制定策略 · 避免对轻量用户添加不必要开销**

@@ -101,13 +101,24 @@ class AnalysisProfile:
 # Profile 定义
 # ═══════════════════════════════════════════════════════════════
 
-# v2.13.0 · Playwright 兜底覆盖的维度（按档位）
-# medium opt-in · 4 维最痛（Codex review 后砍掉 7_industry · 百度搜索信噪比差）
-_PLAYWRIGHT_MEDIUM_DIMS = frozenset({"4_peers", "8_materials", "15_events", "17_sentiment"})
-# deep default · medium 4 维 + 3_macro（stats.gov.cn 官方页 · 权威且无反爬）
-# 注：Codex review 后明确排除 14_moat（百度百科质量差）/ 13_policy（ddgs site: 够用）/
-#     18_trap（小红书抖音反爬+UGC 合规）/ 19_contests（UZI_XQ_LOGIN 专用路径已有）
-_PLAYWRIGHT_DEEP_DIMS = _PLAYWRIGHT_MEDIUM_DIMS | frozenset({"3_macro"})
+# v2.13.0 / v2.13.1 · Playwright 兜底覆盖的维度（按档位）
+#
+# v2.13.1 策略扩展：用户明确本项目是开源研究场景，反爬/合规不受限制，
+# 把 v2.13.0 Codex review 保守排除的 5 维全部加回：
+# - 7_industry（百度搜索结果页 · ddgs site: 的补充）
+# - 14_moat（百度百科公司词条 · 结构化基础信息）
+# - 13_policy（证监会政策动态 · 权威官方页）
+# - 18_trap（小红书搜索 "老师/推荐" 触发词 · 杀猪盘信号）
+# - 19_contests（雪球实盘组合排行榜 · 匿名 public 页）
+_PLAYWRIGHT_MEDIUM_DIMS = frozenset({
+    "4_peers", "8_materials", "15_events", "17_sentiment",
+    "7_industry", "14_moat",  # v2.13.1 · medium 也覆盖这两（日常用得上）
+})
+# deep default · medium 6 维 + 4 维补齐全 10
+_PLAYWRIGHT_DEEP_DIMS = _PLAYWRIGHT_MEDIUM_DIMS | frozenset({
+    "3_macro",                       # stats.gov.cn
+    "13_policy", "18_trap", "19_contests",  # v2.13.1 deep-only
+})
 
 _CORE_FETCHERS = frozenset({
     "0_basic", "1_financials", "2_kline",

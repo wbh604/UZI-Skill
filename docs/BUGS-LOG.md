@@ -7,6 +7,44 @@
 
 ---
 
+## v2.13.1 (2026-04-18 · Playwright 全 10 维覆盖 · 策略契约修订)
+
+### 改进 · 扩展 DIM_STRATEGIES 到全 10 维（策略调整，非 bug 修复）
+- **背景**：v2.13.0 Codex review 出于反爬/合规/信噪比担忧，明确排除 5 维（7_industry/14_moat/13_policy/18_trap/19_contests）。用户明确反馈："反爬合规不是问题，这个是开源研究项目受保护的"
+- **位置**：
+  - `lib/playwright_fallback.py::DIM_STRATEGIES` · 5 → 10 entry
+  - `lib/analysis_profile.py` · `_PLAYWRIGHT_MEDIUM_DIMS` 4→6 维，`_PLAYWRIGHT_DEEP_DIMS` 5→10 维
+  - `tests/test_v2_13_playwright_strategy.py` · 更新 count 断言 + 移除排除护栏
+- **策略变化**：
+  | 维度 | v2.13.0 | v2.13.1 | 目标页 |
+  |---|---|---|---|
+  | 7_industry | ❌ | ✅ medium + deep | 百度搜索 `{行业}+景气度` |
+  | 14_moat | ❌ | ✅ medium + deep | 百度百科 `/item/{name}` |
+  | 13_policy | ❌ | ✅ deep | 证监会 `csrc.gov.cn` |
+  | 18_trap | ❌ | ✅ deep | 小红书 `/search_result?keyword={name}+老师+推荐` |
+  | 19_contests | ❌ | ✅ deep | 雪球 `/cube/rank/list` 匿名组合排行 |
+- **新增 5 个 parser**（`lib/playwright_fallback.py`）：
+  - `_strategy_7_industry` · 抓百度 `<h3>` 标题 + `.content-right` 描述
+  - `_strategy_14_moat` · 抓 `.lemma-summary` + `.basicInfo-item` 键值对
+  - `_strategy_13_policy` · 抓证监会动态 `<a title="...">` 列表
+  - `_strategy_18_trap` · 抓小红书 `"title":"..."` 帖子标题 + 命中数统计（风险信号）
+  - `_strategy_19_contests` · 抓雪球组合 JSON 的 `name` + `total_gain`
+- **回归测试**：
+  - `test_dim_strategies_has_10_entries` (替代 `has_5_entries`)
+  - `test_all_parsers_callable_and_return_none_on_empty_html` · 10 个 parser 都 mock `fetch_url` 返 None · 验证不抛
+  - `test_medium_dims_subset_of_deep` · 护栏：medium 必须是 deep 子集
+- **护栏测试移除**：
+  - `test_excluded_dims_not_in_strategies` 移除（反爬合规不再是契约禁令）
+- **v2.13.0 契约修订**：
+  - ❌ 旧：v2.13.0 BUGS-LOG 说"不能不经 Codex review 加回排除维度"
+  - ✅ 新：**开源研究场景不受合规限制** · 维度扩展由用户需求驱动即可
+- **若未来改 Playwright 层**：
+  - 10 个维度的 parser 如遇 HTML 变化 → 返 None 即可，不要 raise（已在 `fetch_url` 层 try/except）
+  - `_PLAYWRIGHT_MEDIUM_DIMS ⊆ _PLAYWRIGHT_DEEP_DIMS` 关系必须保持（`test_medium_dims_subset_of_deep` 护栏）
+  - 加新维度需同步：(1) `DIM_STRATEGIES` dict (2) `_PLAYWRIGHT_*_DIMS` 白名单 (3) 更新 `test_dim_strategies_has_10_entries` count
+
+---
+
 ## v2.13.0 (2026-04-18 · Playwright 通用兜底 · 按三档 profile 分级)
 
 ### 改进 · Playwright fallback 通用化 + 按 profile 分级

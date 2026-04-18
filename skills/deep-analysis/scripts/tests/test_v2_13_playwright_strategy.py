@@ -56,31 +56,43 @@ def test_lite_profile_disables_playwright():
 
 
 def test_medium_profile_opt_in():
+    """v2.13.1 · medium 6 维（扩展自 v2.13.0 的 4 维）."""
     _reset_env()
     ap, _ = _reload_all()
     p = ap.get_profile("medium")
     assert p.playwright_mode == "opt-in"
-    # 4 维：4_peers / 8_materials / 15_events / 17_sentiment
-    assert len(p.playwright_dims) == 4
-    assert "4_peers" in p.playwright_dims
-    assert "8_materials" in p.playwright_dims
-    # 确认 Codex review 后砍掉的维度不在里面
-    assert "7_industry" not in p.playwright_dims
-    assert "14_moat" not in p.playwright_dims
+    assert len(p.playwright_dims) == 6
+    expected = {"4_peers", "8_materials", "15_events", "17_sentiment",
+                "7_industry", "14_moat"}
+    assert p.playwright_dims == expected
+    # deep-only 维度不在 medium
+    assert "3_macro" not in p.playwright_dims
     assert "13_policy" not in p.playwright_dims
+    assert "18_trap" not in p.playwright_dims
+    assert "19_contests" not in p.playwright_dims
 
 
 def test_deep_profile_default_on():
+    """v2.13.1 · deep 全 10 维覆盖."""
     _reset_env()
     ap, _ = _reload_all()
     p = ap.get_profile("deep")
     assert p.playwright_mode == "default"
-    # 5 维：medium 4 + 3_macro
-    assert len(p.playwright_dims) == 5
-    assert "3_macro" in p.playwright_dims
-    # 明确不包含反爬/合规风险的维度
-    assert "18_trap" not in p.playwright_dims
-    assert "19_contests" not in p.playwright_dims
+    assert len(p.playwright_dims) == 10
+    expected = {"4_peers", "8_materials", "15_events", "17_sentiment",
+                "7_industry", "14_moat", "3_macro",
+                "13_policy", "18_trap", "19_contests"}
+    assert p.playwright_dims == expected
+
+
+def test_medium_dims_subset_of_deep():
+    """medium 维度必须是 deep 的子集（deep 不能比 medium 少）."""
+    _reset_env()
+    ap, _ = _reload_all()
+    medium = ap.get_profile("medium").playwright_dims
+    deep = ap.get_profile("deep").playwright_dims
+    assert medium.issubset(deep), "medium dims must be subset of deep"
+    assert len(deep) > len(medium), "deep 应比 medium 覆盖更多维度"
 
 
 # ─── is_playwright_enabled 三档行为 ───────────────────────────────
@@ -198,11 +210,10 @@ def test_autofill_skipped_when_disabled():
 
 
 def test_autofill_respects_dim_whitelist():
-    """只对 profile.playwright_dims 里的 dim 尝试 · 其他 dim 跳过.
+    """v2.13.1 · medium 6 维白名单内全被调用 · deep-only 维度（3_macro/18_trap 等）跳过.
 
-    medium profile.playwright_dims = {4_peers, 8_materials, 15_events, 17_sentiment}.
-    确认 14_moat / 99_nonexistent / 7_industry (都不在白名单) 不被调用。
-    用空 dict strategies 避免真实网络调用。
+    medium profile.playwright_dims = {4_peers, 8_materials, 15_events, 17_sentiment, 7_industry, 14_moat}.
+    用 patch.dict(clear=True) 避免真实网络调用。
     """
     _reset_env()
     os.environ["UZI_DEPTH"] = "medium"
@@ -215,7 +226,7 @@ def test_autofill_respects_dim_whitelist():
         called_dims.append(ticker)
         return None  # 不产生数据 · attempted++ 但 succeeded 不增
 
-    # 全部 5 个策略都 mock 成 tracking · 避免真实网络
+    # 所有策略都 mock 成 tracking · 避免真实网络
     mocked_strategies = {k: tracking_strategy for k in pf.DIM_STRATEGIES.keys()}
 
     with patch.object(pf, "ensure_playwright_installed", return_value=True), \
@@ -223,20 +234,27 @@ def test_autofill_respects_dim_whitelist():
         # raw 里同时放白名单内 + 白名单外的 dim
         raw = {
             "dimensions": {
-                "4_peers":      {"data": {}},   # 白名单内
-                "8_materials":  {"data": {}},   # 白名单内
-                "15_events":    {"data": {}},   # 白名单内
-                "17_sentiment": {"data": {}},   # 白名单内
-                "14_moat":      {"data": {}},   # 白名单外 (不应被调)
-                "3_macro":      {"data": {}},   # deep 才在白名单 · medium 外 (不应被调)
-                "99_nonexistent": {"data": {}}, # 未知 dim (不应被调)
+                # medium 白名单内 6 维
+                "4_peers":      {"data": {}},
+                "8_materials":  {"data": {}},
+                "15_events":    {"data": {}},
+                "17_sentiment": {"data": {}},
+                "7_industry":   {"data": {}},
+                "14_moat":      {"data": {}},
+                # deep-only (medium 白名单外)
+                "3_macro":      {"data": {}},
+                "13_policy":    {"data": {}},
+                "18_trap":      {"data": {}},
+                "19_contests":  {"data": {}},
+                # 未知 dim
+                "99_nonexistent": {"data": {}},
             }
         }
         summary = pf.autofill_via_playwright(raw, "300308.SZ")
-    # medium 白名单 4 维 · 都有空 data · 都应 attempted
-    # 14_moat / 3_macro / 99_nonexistent 都在白名单外 · 不调
-    assert summary["attempted"] == 4
-    assert len(called_dims) == 4
+    # medium 白名单 6 维 · 都有空 data · 都应 attempted
+    # deep-only 4 维 + 99_nonexistent 都在白名单外 · 不调
+    assert summary["attempted"] == 6
+    assert len(called_dims) == 6
     _reset_env()
 
 
@@ -297,24 +315,31 @@ def test_autofill_skips_dim_with_existing_data():
 
 # ─── DIM_STRATEGIES 稳定性 ──────────────────────────────────────
 
-def test_dim_strategies_has_5_entries():
-    """post-Codex review · 策略表应该只有 5 维."""
+def test_dim_strategies_has_10_entries():
+    """v2.13.1 · 全 10 维覆盖（v2.13.0 的 5 维 + v2.13.1 的 5 维）."""
     _reset_env()
     _, pf = _reload_all()
-    assert len(pf.DIM_STRATEGIES) == 5
-    expected = {"4_peers", "8_materials", "15_events", "17_sentiment", "3_macro"}
+    assert len(pf.DIM_STRATEGIES) == 10
+    expected = {
+        "4_peers", "8_materials", "15_events", "17_sentiment", "3_macro",
+        "7_industry", "14_moat", "13_policy", "18_trap", "19_contests",
+    }
     assert set(pf.DIM_STRATEGIES.keys()) == expected
 
 
-def test_excluded_dims_not_in_strategies():
-    """明确排除的维度不在 DIM_STRATEGIES · 护栏."""
+def test_all_parsers_callable_and_return_none_on_empty_html():
+    """10 个 parser 都应可调用 · fetch_url 返 None 时 parser 返 None 不抛."""
     _reset_env()
     _, pf = _reload_all()
-    excluded = ("7_industry", "14_moat", "13_policy", "18_trap", "19_contests")
-    for d in excluded:
-        assert d not in pf.DIM_STRATEGIES, (
-            f"{d} 已被 Codex review 明确排除（反爬/合规/信噪比差）"
-        )
+    # mock fetch_url 返 None（模拟网络失败）
+    minimal_raw = {
+        "ticker": "300308.SZ",
+        "dimensions": {"0_basic": {"data": {"name": "中际旭创", "industry": "通信设备"}}},
+    }
+    with patch.object(pf, "fetch_url", return_value=None):
+        for dim_key, strategy in pf.DIM_STRATEGIES.items():
+            result = strategy("300308.SZ", minimal_raw)
+            assert result is None, f"{dim_key} parser 应在 fetch_url 返 None 时返 None，got {result}"
 
 
 # ─── junk_filter 模块 ────────────────────────────────────────────
