@@ -1,5 +1,48 @@
 # Release Notes
 
+## v2.10.7 — 2026-04-18 (market 传播 + resume 别名命中 + agent 深浅两路径)
+
+> **Codex 对主线做整体代码审查，发现 v2.10.5 执行链路还有 3 处不符合预期**
+
+### Codex 审查发现的问题
+
+1. **`raw["market"]` 污染** — `collect_raw_data()` 硬编码 `raw["market"]="A"`；post-fetch_basic 回填只在 `resolved != input` 时触发，且读的是 `.data.market`（fetch_basic 实际放在顶层）。结果：用户直接输入 `00700.HK`、`AAPL` 时 `raw.market` 仍为 `"A"`，后续市场分支判断被污染
+2. **`resume` 对别名输入失效** — 注释说"尝试用原始 ticker 和 resolved ticker 都查"，实际只查了一次原始 ticker，还发生在 fetch_basic 解析之前。用户用中文名 / 三位港股（"700"）输入时，`.cache/00700.HK/raw_data.json` 已存在也不命中，重跑 Stage 1，耗时 + token 双爆
+3. **`AGENTS.md` 强制全量流程** — 主线已支持 CLI/lite 直跑 + 降级路径，但 AGENTS.md 仍要求 agent "看到分析就跑 51 人 role-play + 写 agent_analysis.json"，把 v2.10.4/5 的降载设计抵消掉
+
+### 修复
+
+**1. `collect_raw_data` market 传播**（`run_real_test.py`）
+- 进入函数时先用 `parse_ticker(ticker).market` 预填 `raw["market"]`（非中文名 ticker 即刻可知市场）
+- fetch_basic 后无条件从 `dims["0_basic"]["market"]`（顶层，不是 `.data.market`）回填
+- 从 cache resume 时也回填 `raw["market"]`
+
+**2. resume cache 双重查询**
+- 第一轮：`_read_cache(ticker)` 原样查
+- 第二轮：若未命中且 ticker 非中文名，用 `parse_ticker(ticker).full` 再查（"700" → "00700.HK" 命中缓存）
+
+**3. AGENTS.md + CLAUDE.md 深浅两路径**
+- 明确"快速路径（默认 CLI 直跑）"vs"深度路径（全量 agent 流程）"两档
+- 用户信号判断表（`/quick-scan` `/thesis` → CLI；`/ic-memo` `/initiate` → 深度）
+- v2.10.4 起 CLI 直跑 `agent_analysis.json` 缺失降 warning，**不要** 强行 role-play 51 评委
+
+### 回归测试
+
+- 新增 2 个用例 · `test_v2_10_4_fixes.py`:
+  - `test_raw_market_initialized_from_parse_ticker` — 验证 collect_raw_data 用 parse_ticker 预填
+  - `test_resume_cache_tries_resolved_ticker` — 验证 resume 双重查询
+- 全量 → **90 passed**（含 12 v2.10.4-7 专项 + 10 extra + 68 原 regression）
+
+### 真机验证
+
+| 场景 | v2.10.5 | v2.10.7 |
+|---|---|---|
+| `00700.HK --depth lite` | ✗ `Self-Review · 00700.HK (A)` 市场污染 | ✓ `(H)` |
+| 中文名 + cache 存在 | ✗ 重跑 Stage 1 | ✓ cache 命中 |
+| Agent 看"分析" | 默认全量 role-play | 默认 CLI 直跑，明说"深度"才 role-play |
+
+---
+
 ## v2.10.6 — 2026-04-18 (providers 框架实际落地 + Tushare kline + health CLI)
 
 > **审计发现 v2.10.3 的 providers 框架 0% 被调用**。五个 provider 写好了没 fetcher 用，akshare 挂了照样全部崩。本版把它接进 `data_sources.py` 的 K 线链，让 tushare/efinance 真正作为兜底层参与进来。

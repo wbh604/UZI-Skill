@@ -100,18 +100,44 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
     if os.environ.get("UZI_NO_RESUME") == "1":
         resume = False
     from datetime import datetime as _dt
-    raw = {"ticker": ticker, "market": "A", "fetched_at": _dt.now().isoformat(timespec="seconds")}
+
+    # v2.10.6 · market 先用 parse_ticker 前置识别（HK/US 不再默认 "A"）
+    # 原因：fetch_basic 有可能失败，但 parse_ticker("00700.HK") 纯字符串即可知道是 H 股
+    from lib.market_router import parse_ticker as _parse, is_chinese_name as _is_cn
+    _initial_market = "A"
+    try:
+        if not _is_cn(ticker):
+            _initial_market = _parse(ticker).market
+    except Exception:
+        pass
+    raw = {"ticker": ticker, "market": _initial_market, "fetched_at": _dt.now().isoformat(timespec="seconds")}
     dims: dict = {}
     t0 = time.time()
 
     # v2.6 · resume: 加载已有 raw_data.json 中的 dim 缓存
+    # v2.10.6 · resume cache 双重查询：原始 ticker 和 parse_ticker 后的 full code 都试
+    # 解决：用户用中文名/三位港股输入时，cache 是按 resolved 代码存的，不查就错过
     cached_dims: dict = {}
     if resume:
         from lib.cache import read_task_output as _read_cache
-        # 尝试用原始 ticker 和可能的 resolved ticker 都查
+        # 1) 原始 ticker 直查
         prev = _read_cache(ticker, "raw_data")
+        # 2) 如果没命中，用 parse_ticker 推测的 full code 再查（三位港股 "700" → "00700.HK"）
+        if not prev and not _is_cn(ticker):
+            try:
+                _full = _parse(ticker).full
+                if _full != ticker:
+                    prev = _read_cache(_full, "raw_data")
+                    if prev:
+                        print(f"  [resume] cache 命中 · {ticker} → {_full}")
+            except Exception:
+                pass
         if prev and isinstance(prev.get("dimensions"), dict):
             cached_dims = prev["dimensions"]
+            # 从 cache 也回填 market（它是 fetch_basic 真实抓回来的）
+            _cached_market = prev.get("market")
+            if _cached_market in ("A", "H", "U"):
+                raw["market"] = _cached_market
             valid_count = sum(
                 1 for d in cached_dims.values()
                 if isinstance(d, dict)
@@ -152,7 +178,11 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
         print(f"  [resolve] {ticker} → {resolved_ticker}")
         ticker = resolved_ticker
         raw["ticker"] = ticker  # 更新 raw 的 ticker 字段
-        raw["market"] = dims["0_basic"].get("data", {}).get("market", "A")
+    # v2.10.6 · market 无条件从 fetch_basic top-level 回填（不是 .data.market，fetch_basic
+    # 把 market 放在顶层），解决 HK/US 直输时 raw.market 仍为 "A" 的污染问题
+    _basic_market = dims.get("0_basic", {}).get("market")
+    if _basic_market in ("A", "H", "U"):
+        raw["market"] = _basic_market
 
     # ── Wave 2: all other 19 fetchers in parallel ──
     # v2.6 · 加 per-fetcher timeout + overall timeout 防止 hang 卡死整条流水线

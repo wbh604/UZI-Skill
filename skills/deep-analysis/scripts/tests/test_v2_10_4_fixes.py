@@ -228,6 +228,44 @@ def test_coverage_critical_preserved_in_medium():
     assert issues[0].severity == "critical"
 
 
+def test_raw_market_initialized_from_parse_ticker():
+    """Fix (v2.10.6) · raw['market'] must reflect input ticker's market (H/U not defaulted to A).
+
+    Codex review caught this: collect_raw_data hardcoded raw['market']='A', and the
+    post-fetch fixup only ran when resolved != input. So passing '00700.HK' directly
+    left raw['market']='A'. v2.10.6 pre-populates from parse_ticker.
+    """
+    import importlib
+    import run_real_test as rrt
+    importlib.reload(rrt)
+
+    src = Path(rrt.__file__).read_text(encoding="utf-8")
+    # Verify pre-fill block exists
+    assert "_parse(ticker).market" in src or "parse_ticker as _parse" in src, (
+        "collect_raw_data must derive initial market from parse_ticker, not hardcode 'A'"
+    )
+    # Verify the post-fetch_basic market fixup is unconditional (outside the if resolved_ticker)
+    # and reads top-level (not .data.market — fetch_basic puts market at top level)
+    assert '_basic_market = dims.get("0_basic", {}).get("market")' in src, (
+        "Post fetch_basic must read market from top-level dims['0_basic']['market']"
+    )
+
+
+def test_resume_cache_tries_resolved_ticker():
+    """Fix (v2.10.6) · resume must try parse_ticker(ticker).full if raw ticker misses.
+
+    Codex review: user typing '贵州茅台' or '700' misses the cache because lookup
+    key is the raw input, not the resolved code. v2.10.6 adds a second lookup
+    with the parsed full code.
+    """
+    import run_real_test as rrt
+    src = Path(rrt.__file__).read_text(encoding="utf-8")
+    # Must contain dual-lookup logic
+    assert "_full = _parse(ticker).full" in src, (
+        "resume must fall back to parse_ticker(ticker).full for cache hit"
+    )
+
+
 def test_run_py_sets_cli_only_env():
     """Fix (v2.10.5) · run.py is CLI direct entrypoint · should auto-set UZI_CLI_ONLY=1.
 

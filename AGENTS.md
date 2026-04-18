@@ -15,7 +15,35 @@
 - 游资只做 A 股 → 分析美股时直接跳过
 - 木头姐看颠覆创新 → 给她白酒股她会说"不在平台里"
 
-## 用户说"分析 XXX"时的完整流程
+## 深浅两套路径 · 按用户意图选一条（v2.10.6）
+
+用户一句话只说"分析 XXX"**不一定**等于要跑全量 agent 流程。先做判断：
+
+| 用户信号 | 推荐路径 | 耗时 | 为什么 |
+|---|---|---|---|
+| "快速看看"、"先扫一眼"、`/quick-scan`、`/thesis` | **CLI 直跑 lite** | 30-60s | 7 维核心数据 + 10 投资者，脚本直接出报告 |
+| 明确要求"深度分析"、"估值"、"DCF"、"首次覆盖"、`/ic-memo`、`/initiate` | **全量 agent 流程** | 5-10min | 22 维 + 51 评委 role-play + agent_analysis.json |
+| 未明确 | **默认 medium + CLI 直跑**（仍出完整报告） | 2-4min | v2.10.5 起 CLI 直跑 medium 也能完整出 HTML |
+
+**关键**：从 v2.10.4 起，`run.py` 直跑模式下 `agent_analysis.json` 缺失会自动降级为 warning，**不会 block HTML 生成**。不要为了"跑一个完整流程"强行 role-play 51 评委——那是用户要求"深度"时才需要。
+
+### 路径 A · CLI 直跑（快速）
+
+```bash
+python3 run.py <ticker> --depth lite --no-browser    # 最快
+python3 run.py <ticker> --depth medium --no-browser  # 默认完整度
+```
+
+脚本会：
+1. 跑 stage1 采集数据
+2. 自检 self-review（CLI 模式下 agent_analysis 缺失是 warning）
+3. 调 stage2 组装 HTML 报告
+
+**你只需**：读最终 HTML / synthesis.json，向用户汇报核心结论。**不需要** role-play 51 评委。
+
+### 路径 B · 全量 agent 流程（深度）
+
+用户明确要深度分析（estimation/DCF/IC memo），按下面 Step 1-5 走：
 
 ### Step 1 · 安装依赖（首次）
 
@@ -25,7 +53,7 @@
 
 进入 `skills/deep-analysis/scripts/` 目录，调用 `stage1()` 采集 22 维数据 + 机构建模 + 规则引擎骨架分。
 
-### Step 3 · 你来分析（核心！不能跳过！）
+### Step 3 · 你来分析（全量路径必走，不能跳过）
 
 <HARD-GATE>
 Do NOT proceed to report generation until you have:

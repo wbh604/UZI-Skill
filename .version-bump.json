@@ -1,5 +1,5 @@
 {
-  "version": "2.10.6",
+  "version": "2.10.7",
   "files": [
     ".claude-plugin/plugin.json",
     ".cursor-plugin/plugin.json",
