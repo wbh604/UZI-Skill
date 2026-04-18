@@ -947,11 +947,44 @@ def _auto_summarize_dim(dim_key: str, label: str, dim: dict, score: float) -> st
     return f"{label}：{'、'.join(items) if items else '无数据'}。" if items else ""
 
 
+# v2.12.1 · MX/ddgs 返回垃圾数据的黑名单 · 模块级常量方便扩展
+_AUTOFILL_JUNK_PATTERNS = (
+    "类型；类型",           # MX prompt 残留（中际旭创实测）
+    "XXX", "TODO", "null", "undefined", "None",
+    "抱歉，", "无法回答", "我不知道", "不清楚", "暂无数据",
+    "（示例）", "（待补）",
+)
+
+
+def _is_junk_autofill(text: str) -> bool:
+    """v2.12.1 · 检测 MX/ddgs 兜底返回的噪音数据（不写进 data 字段）.
+
+    触发条件：
+    1. 长度 < 5 → 太短无意义
+    2. 命中黑名单短语（prompt 残留 / 模板占位符 / LLM 道歉）
+    3. 分号分隔全同（"类型；类型；类型"）
+    """
+    if not text:
+        return True
+    t = str(text).strip()
+    if len(t) < 5:
+        return True
+    if any(j in t for j in _AUTOFILL_JUNK_PATTERNS):
+        return True
+    # 分号分隔全同：如 "类型；类型"
+    parts = [p.strip() for p in t.split("；") if p.strip()]
+    if len(parts) >= 2 and len(set(parts)) == 1:
+        return True
+    return False
+
+
 def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
     """v2.6.1 · 自动补齐 6 个定性维度的空字段（in-place 修改 raw['dimensions']）.
 
     优先级：MX 妙想 API → ddgs WebSearch → 显式标记 autofill_failed。
     适用场景：直跑模式（无 agent 介入），fetcher 拿到空数据时不能让报告也空。
+
+    v2.12.1 加入 _is_junk_autofill 质量过滤 · 垃圾数据（"类型；类型" 等）不写入字段.
     """
     try:
         from lib.mx_api import MXClient
@@ -1022,6 +1055,9 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
             try:
                 r = client.query(query)
                 text = _extract_mx_text(r)
+                # v2.12.1 · 过滤 MX 返回的垃圾数据（"类型；类型"/"抱歉"/重复等）
+                if _is_junk_autofill(text):
+                    text = ""
                 if text:
                     source_used = "mx_api"
             except Exception:
@@ -1039,6 +1075,9 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
                         if title or body:
                             snippets.append(f"{title} — {body[:80]}".strip(" —"))
                 text = "；".join(snippets)[:300]
+                # v2.12.1 · 过滤 ddgs 拼接后的噪音（长度过短 / 模板占位符）
+                if _is_junk_autofill(text):
+                    text = ""
                 if text:
                     source_used = "ddgs"
             except Exception:

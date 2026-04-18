@@ -336,9 +336,27 @@ def extract_features(raw: dict, dims: dict) -> dict:
     # PS ratio
     rev = f.get("revenue_latest_yi", 0)
     f["ps"] = round(mcap / rev, 2) if rev > 0 else 0
-    # Industry growth & market share (placeholders from industry dim)
-    f["industry_growth"] = _f(industry.get("growth"), default=10)
-    f["market_share"] = _f(industry.get("market_share"), default=10)
+    # v2.12.1 · 真实计算 industry_growth 和 market_share（原版硬编 default=10 → BCG 永远 Dog）
+
+    # industry_growth: 从 industry.growth 文本 regex 解析百分比
+    # industry.growth 可能是 "25%/年"/"+30%"/"25"/字典{growth:"25%"} 等格式
+    _growth_raw = industry.get("growth")
+    if isinstance(_growth_raw, (int, float)):
+        f["industry_growth"] = float(_growth_raw)
+    elif isinstance(_growth_raw, str):
+        _gm = re.search(r"([+\-]?\d{1,3}(?:\.\d+)?)\s*%", _growth_raw)
+        f["industry_growth"] = float(_gm.group(1)) if _gm else 0.0
+    else:
+        f["industry_growth"] = 0.0
+
+    # market_share: 真实 = 公司市值 / 行业总市值 × 100
+    # 数据源：basic.market_cap (亿) + industry.cninfo_metrics.total_mcap_yi (亿)
+    _cmcap_yi = _f(basic.get("market_cap_yi")) or _f(basic.get("market_cap"))
+    _imcap_yi = _f((industry.get("cninfo_metrics") or {}).get("total_mcap_yi"))
+    if _cmcap_yi > 0 and _imcap_yi > 0:
+        f["market_share"] = round(_cmcap_yi / _imcap_yi * 100, 2)
+    else:
+        f["market_share"] = 0.0
     # Dividend yield from valuation/basic
     f["dividend_yield"] = _f(valuation.get("dividend_yield"), default=0)
     # PEG

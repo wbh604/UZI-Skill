@@ -1,5 +1,78 @@
 # Release Notes
 
+## v2.12.1 — 2026-04-18 (4 个报告板块空数据 / 错数据修复)
+
+> **用户实测中际旭创（300308.SZ）发现 4 处 数据层 / 模型层 bug · 一次性 hotfix**
+
+### 用户反馈
+
+- 同行对比板块完全空（"peer_table: []"）
+- 行业景气 growth / TAM / 渗透率 永远 "—"
+- 原材料 core_material 显示 "类型；类型"（MX prompt 残留）
+- BCG 矩阵：**所有股票都归 Dog 瘦狗 · 考虑剥离**（中际旭创作为 CPO 全球龙头被归 Dog 明显错误）
+
+### 4 个 Bug 根因 + 修复
+
+**Bug 1 · `4_peers` 东财 push2 挂了无 fallback**（`fetch_peers.py`）
+- 原版：主链挂了 `peer_table/peer_comparison` 整表空
+- 修：三层 fallback 链 + 一层保底
+  - Tier 1 主链（不变）
+  - Tier 2 · 2.5s retry（网络抖动）
+  - Tier 3 · **雪球 Playwright 登录态**（用户 opt-in `UZI_XQ_LOGIN=1`）· 复用 `lib/xueqiu_browser.py` v2.7.1 基础设施 · 新加 `fetch_peers_via_browser(code)` 从 `xueqiu.com/S/{sym}` 正则抽同板块股票
+  - Tier 4 · 保底返公司自己一行 + `fallback: True` + `fallback_reason` 字段让 agent 识别降级
+
+**Bug 2 · `7_industry` growth/tam/penetration 永远 "—"**（`fetch_industry.py`）
+- 原版 3 个问题叠加：① growth regex 不带上下文，被 "PE 25%" 抢先匹配 ② penetration 完全没 regex ③ `all_bodies` 只拼 body 不含 title（关键数字常在 title 如 "净利齐涨超40%"）
+- 修：
+  - growth regex 上下文感知 · 关键词 `增长/增速/CAGR/涨超/涨幅/暴涨/翻倍/提升` + 0-20 字符 + %
+  - 加 TAM 上下文（市场规模/规模达/产业规模/TAM）
+  - 加 penetration_heuristic 渗透率 regex
+  - `main` line 228 · penetration 补 dynamic 兜底（原版遗漏）
+  - all_bodies 改为拼 title + body
+
+**Bug 3 · `core_material = "类型；类型"` MX 垃圾数据**（`run_real_test.py`）
+- 原版：`_autofill_qualitative_via_mx` 后处理阶段直接把 MX API 返回写入字段，无质量校验
+- 修：
+  - 加 `_is_junk_autofill(text)` 函数 · 检测 长度<5 / 黑名单短语 / 分号分隔全同
+  - `_AUTOFILL_JUNK_PATTERNS` 模块级常量便于扩展
+  - MX 和 ddgs 返回后分别过滤 · 垃圾 → `text = ""` 不写入
+  - 保留 `_autofill_failed` 让 agent 明确"数据不足"
+
+**Bug 4 · BCG 所有股归 Dog**（`lib/stock_features.py` + `lib/deep_analysis_methods.py`）
+- 原版：
+  - `stock_features.py:340-341` 硬编 `f["market_share"] = _f(industry.get("market_share"), default=10)` · 但 `industry.market_share` key 从未被任何 fetcher 写入 · 永远 default 10
+  - BCG 阈值 `share>15 AND growth>10` · 默认 10/10 不满足任何 >15 条件 → 必落 Dog
+- 修：
+  - `stock_features.py` 真实算 `market_share = 公司市值 / 行业总市值 × 100`（数据源 `basic.market_cap_yi` / `industry.cninfo_metrics.total_mcap_yi`）
+  - `industry_growth` 从 `industry.growth` 字符串 regex 解析百分比（Bug 2 修复后有真实值）
+  - BCG 阈值调整 · Star `share>3 AND growth>15` / Cash Cow `share>3 AND growth≤15` / Question Mark `share≤3 AND growth>15` / Dog `share≤3 AND growth≤15`（`share>15` 对 A 股单股非现实）
+  - `default=10` → `default=0`（数据缺失明确落 Dog 而不是假数据）
+
+### 回归测试
+
+- 新增 `tests/test_v2_12_1_data_fixes.py` · **16 个用例**（4 bugs × 多场景 + 护栏）
+- 更新 `test_no_regressions.py::test_hk_branches_isolated` HK 分支独立 try/except
+- 全量 **131 passed**（原 115 + 新 16）
+
+### 中际旭创端到端验证（`300308.SZ --depth medium --no-resume`）
+
+| 板块 | v2.12.0 | v2.12.1 |
+|---|---|---|
+| 4_peers peer_table | `[]` 空 | 1 行（公司自己）+ fallback_reason 说明降级 |
+| 7_industry.growth | `"—"` | **"40%/年"** |
+| 8_materials.core_material | `"类型；类型"` | 真实公司概况 ddgs 结果 |
+| BCG category | Dog 瘦狗 考虑剥离 | **Star (明星)** · market_share 5.5% · growth 40% |
+
+### 致谢
+
+本版用户反馈驱动 · 论坛 + 微信群实测。Bug 4 BCG 是全部历史版本都存在的模型 bug，中际旭创测试暴露出来后一并修复。
+
+### 升级
+
+`git pull origin main` · 老 cache 不会自动重跑 · 重新跑 `--no-resume` 能立即看到 4 个板块改观。
+
+---
+
 ## v2.12.0 — 2026-04-18 (6 平台社交热榜聚合)
 
 > **参考 [run-bigpig/jcp](https://github.com/run-bigpig/jcp)（韭菜盘 AI · 851 ⭐）的 `internal/services/hottrend` 设计，补 DuckDuckGo web search 的盲区**

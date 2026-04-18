@@ -485,17 +485,20 @@ def build_competitive_analysis(features: dict, raw_data: dict) -> dict:
     total_threat = new_entrants_threat + substitutes_threat + supplier_power + buyer_power + rivalry
     attractiveness = round((25 - total_threat) / 20 * 100, 0)  # 0-100
 
-    # BCG position (simplified)
-    market_share = _num(features.get("market_share", 10))  # % placeholder
-    market_growth = _num(features.get("industry_growth", 10))
+    # v2.12.1 · BCG 矩阵定位
+    # market_share 真实 = 公司市值 / 行业总市值 × 100（stock_features 已修复）
+    # industry_growth 从 industry.growth 文本解析（fetch_industry regex 已修复）
+    # 阈值调整：A 股单股很少能过 15% 市占率；3% 已属行业前 top · 15% growth 是成长期线
+    market_share = _num(features.get("market_share", 0))    # % 真实计算
+    market_growth = _num(features.get("industry_growth", 0))  # % 真实计算
 
-    if market_share > 15 and market_growth > 10:
+    if market_share > 3 and market_growth > 15:
         bcg = "Star (明星)"
         bcg_action = "继续投入，抢占市场"
-    elif market_share > 15:
+    elif market_share > 3:
         bcg = "Cash Cow (现金牛)"
         bcg_action = "维持运营，最大化现金回收"
-    elif market_growth > 10:
+    elif market_growth > 15:
         bcg = "Question Mark (问号)"
         bcg_action = "选择性投入 / 或退出"
     else:

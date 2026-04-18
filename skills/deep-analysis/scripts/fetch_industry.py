@@ -139,13 +139,58 @@ def _dynamic_industry_overview(industry: str) -> dict:
         ]
 
     # 启发式提取（agent 可覆盖）
-    all_bodies = " ".join(s.get("body", "") for items in snippets.values() for s in items)
-    # 简单 growth 关键词
+    # v2.12.1 · 同时读 title 和 body（很多热门新闻的关键数字在 title 里，如"净利齐涨超40%"）
+    all_bodies = " ".join(
+        f"{s.get('title', '')} {s.get('body', '')}"
+        for items in snippets.values() for s in items
+    )
     import re
-    growth_match = re.search(r"([+\-]?\d{1,3}(?:\.\d+)?)\s*%", all_bodies)
-    growth_heuristic = f"{growth_match.group(1)}%/年" if growth_match else "—"
-    tam_match = re.search(r"(\d{1,5}(?:\.\d+)?)\s*[亿万]", all_bodies)
-    tam_heuristic = f"¥{tam_match.group(1)}亿" if tam_match else "—"
+
+    # v2.12.1 · growth 上下文感知：优先匹配"增长/增速/CAGR/同比/增幅/复合增长/涨超/涨幅/提升"附近的 %
+    # 避免被 "失业率 5%" "PE 25%" 等不相关的 % 抢先
+    # 关键词扩展到"涨超/涨幅/暴涨/翻倍/提升/上升/上涨"以覆盖中文财经新闻的常见表达
+    growth_heuristic = "—"
+    growth_context_pat = re.compile(
+        r"(?:增长|增速|CAGR|复合增长|同比|增幅|年均增长|涨超|涨幅|暴涨|翻倍|提升|上升|上涨|净利齐涨)"
+        r"[^%]{0,20}?([+\-]?\d{1,3}(?:\.\d+)?)\s*%"
+    )
+    m = growth_context_pat.search(all_bodies)
+    if m:
+        growth_heuristic = f"{m.group(1)}%/年"
+    else:
+        # 次级兜底：含"行业"/"市场" 前后的 %
+        m2 = re.search(
+            r"(?:行业|市场|产业)[^%]{0,30}?([+\-]?\d{1,3}(?:\.\d+)?)\s*%|"
+            r"([+\-]?\d{1,3}(?:\.\d+)?)\s*%\s*(?:的?增长|的?增速)",
+            all_bodies,
+        )
+        if m2:
+            val = m2.group(1) or m2.group(2)
+            growth_heuristic = f"{val}%/年"
+
+    # TAM：匹配"市场规模/规模达/将达" 附近的"XX亿"
+    tam_heuristic = "—"
+    tam_context_pat = re.compile(
+        r"(?:市场规模|规模达|规模约|将达|产业规模|TAM|行业规模)[^亿]{0,20}?(\d{1,5}(?:\.\d+)?)\s*亿"
+    )
+    m = tam_context_pat.search(all_bodies)
+    if m:
+        tam_heuristic = f"¥{m.group(1)}亿"
+    else:
+        m2 = re.search(r"(\d{1,5}(?:\.\d+)?)\s*亿\s*(?:元)?\s*(?:市场|规模)", all_bodies)
+        if m2:
+            tam_heuristic = f"¥{m2.group(1)}亿"
+
+    # v2.12.1 · penetration 渗透率提取（原版完全缺失）
+    penetration_heuristic = "—"
+    pen_pat = re.compile(
+        r"渗透率[^%]{0,10}?(\d{1,3}(?:\.\d+)?)\s*%|"
+        r"(\d{1,3}(?:\.\d+)?)\s*%\s*的?渗透率"
+    )
+    m = pen_pat.search(all_bodies)
+    if m:
+        val = m.group(1) or m.group(2)
+        penetration_heuristic = f"{val}%"
 
     # 生命周期关键词扫描
     lifecycle = "—"
@@ -159,6 +204,7 @@ def _dynamic_industry_overview(industry: str) -> dict:
     return {
         "growth_heuristic": growth_heuristic,
         "tam_heuristic": tam_heuristic,
+        "penetration_heuristic": penetration_heuristic,  # v2.12.1
         "lifecycle_heuristic": lifecycle,
         "web_snippets": snippets,
         "snippet_count": sum(len(v) for v in snippets.values()),
@@ -182,10 +228,11 @@ def main(industry: str) -> dict:
     cninfo_metrics = _cninfo_industry_metrics(industry)
 
     # 合并：硬编码优先，没有则走动态启发 + 真实 snippets
-    growth      = est.get("growth")     or dynamic.get("growth_heuristic")   or "—"
-    tam         = est.get("tam")        or dynamic.get("tam_heuristic")      or "—"
-    penetration = est.get("penetration")                                      or "—"
-    lifecycle   = est.get("lifecycle")  or dynamic.get("lifecycle_heuristic") or "—"
+    # v2.12.1 · penetration 补 dynamic 兜底（原版遗漏）
+    growth      = est.get("growth")     or dynamic.get("growth_heuristic")       or "—"
+    tam         = est.get("tam")        or dynamic.get("tam_heuristic")          or "—"
+    penetration = est.get("penetration") or dynamic.get("penetration_heuristic") or "—"
+    lifecycle   = est.get("lifecycle")  or dynamic.get("lifecycle_heuristic")    or "—"
     note        = est.get("note", "")
 
     source_parts = ["cninfo:stock_industry_pe_ratio"]

@@ -181,6 +181,77 @@ def fetch_cubes_via_browser(xq_symbol: str, limit: int = 50) -> list[dict]:
     return out
 
 
+def fetch_peers_via_browser(stock_code: str, max_peers: int = 20) -> list[dict]:
+    """v2.12.1 · 雪球登录态抓同行列表（Tier 3 fallback for fetch_peers.py）.
+
+    策略：
+      1. 用 xq_symbol 转换（600519 → SH600519, 300308 → SZ300308, 00700 → HK00700）
+      2. 打开 https://xueqiu.com/S/{sym}/F10 F10 页面（含"公司概况"/"行业对比"）
+      3. 从页面 HTML 用 regex 粗提取同板块/同行业股票 name + code
+      4. 每条返回 {name, code, mcap_yi, pe, pb}（无数据用 0 兜底）
+
+    失败（未 opt-in、未登录、解析失败、网络等）全部返 [] · 调用方降级.
+    """
+    if not is_login_enabled():
+        return []
+
+    # 代码 → 雪球 symbol
+    code_str = str(stock_code).strip()
+    if code_str.startswith("6") or code_str.startswith("9"):
+        xq_sym = f"SH{code_str}"
+    elif code_str.startswith(("0", "3")):
+        xq_sym = f"SZ{code_str}"
+    elif code_str.startswith(("4", "8")):
+        xq_sym = f"BJ{code_str}"
+    elif code_str.isdigit() and len(code_str) <= 5:
+        xq_sym = f"HK{code_str.zfill(5)}"
+    else:
+        # 美股 / 未知 → 直接用 code
+        xq_sym = code_str.upper()
+
+    url = f"https://xueqiu.com/S/{xq_sym}"
+    html = fetch_with_browser(url, timeout=20)
+    if not html:
+        return []
+
+    import re
+    # 匹配"同行业"/"对比公司"区域的股票代码
+    # 雪球 F10 页面中同板块股票常见 pattern: <a href="/S/SH600519">贵州茅台</a>
+    peers: list[dict] = []
+    seen_codes: set[str] = set()
+    # pattern: S/SZ300308 格式的链接 + 后面的公司名
+    link_pat = re.compile(
+        r'/S/([A-Z]{2}\d{5,6})"[^>]*>([^<]{1,20})</a>',
+        re.IGNORECASE,
+    )
+    for m in link_pat.finditer(html):
+        xq_code = m.group(1).upper()
+        name = m.group(2).strip()
+        # 从 xq_code 还原六位数字代码
+        if xq_code.startswith(("SH", "SZ", "BJ")):
+            six_code = xq_code[2:]
+            suffix = {"SH": "SH", "SZ": "SZ", "BJ": "BJ"}[xq_code[:2]]
+            normalized = f"{six_code}.{suffix}"
+        elif xq_code.startswith("HK"):
+            normalized = f"{xq_code[2:]}.HK"
+        else:
+            normalized = xq_code
+        if normalized in seen_codes or not name or len(name) < 2:
+            continue
+        seen_codes.add(normalized)
+        peers.append({
+            "name": name,
+            "code": normalized,
+            "mcap_yi": 0,  # 雪球 F10 HTML 里 mcap 需要进一步解析，v2.12.1 先只返 name+code
+            "pe": 0,
+            "pb": 0,
+        })
+        if len(peers) >= max_peers:
+            break
+
+    return peers
+
+
 # ─── CLI for one-time login ──
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"

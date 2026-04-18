@@ -1,9 +1,94 @@
 # BUGS-LOG · 防回归记录
 
 每个 bug 修完都登记到这里。**未来改这些代码区域时，必须回看本文件确保不引入回归。**
-对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py` + `tests/test_v2_10_4_fixes.py` + `tests/test_v2_11_scoring_calibration.py`。
+对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py` + `tests/test_v2_10_4_fixes.py` + `tests/test_v2_11_scoring_calibration.py` + `tests/test_v2_12_1_data_fixes.py`。
 
 **登记规范**：每条必含 症状 / 位置 / 根因 / 影响 / 修法 / 验证 / 回归测试 / "未来改该区域注意事项"
+
+---
+
+## v2.12.1 (2026-04-18 · 4 个报告板块空数据 / 错数据修复)
+
+用户实测中际旭创（300308.SZ）发现 4 个板块问题 · 一次性修完.
+
+### BUG · `4_peers` 东财 push2 挂了同行表空白
+- **症状**：报告"同行对比"板块完全空 · `peer_table: []` · `peer_comparison: []`
+- **位置**：`fetch_peers.py::main`（A 股分支 line 72-121 原版）
+- **根因**：现有 try/except 只 catch 异常到 `peers_raw`，主链路 `ak.stock_board_industry_cons_em`（走 push2）挂了后没切换到 fallback 源
+- **影响**：任何 push2 被反爬/限流的网络环境（国内代理、Codex 沙箱）同行表必空
+- **修法**（三层 fallback + 一层保底）：
+  1. Tier 1 主链（不变）
+  2. Tier 2 · 2.5s 后 retry 一次（网络抖动兜底）
+  3. Tier 3 · 雪球 Playwright 登录态（用户 opt-in `UZI_XQ_LOGIN=1`）· 复用 `lib/xueqiu_browser.py::fetch_with_browser` + 新加 `fetch_peers_via_browser(code)`
+  4. Tier 4 · 最低保底：`_build_self_only_table` 返回公司自己一行 + `fallback: True` + `fallback_reason` 字段
+- **验证**：中际旭创 E2E `peer_table` 至少有公司自己一行（不再空） + `fallback_reason` 明确说明降级原因
+- **回归测试**：`test_v2_12_1_data_fixes.py::test_fetch_peers_has_self_only_fallback` / `test_fetch_peers_tier_chain_documented` / `test_fetch_peers_fallback_reason_surfaced` / `test_xueqiu_browser_has_fetch_peers_function` / `test_xueqiu_browser_peer_fn_respects_opt_in`
+- **若未来改 fetch_peers**：Tier 4 `_build_self_only_table` 保底必须保留（不能回到"整表空"）· `data.fallback_reason` 字段 agent 依赖识别降级· 雪球 opt-in 必须保留 `is_login_enabled()` 检查不能改成默认启用（headless 环境会卡）
+
+### BUG · `7_industry.growth/tam/penetration` 永远 `—`
+- **症状**：行业景气板块的增速/TAM/渗透率 3 个字段永远是 `—`，即便 `dynamic_snippets` 已抓到 9 条 search 结果
+- **位置**：`fetch_industry.py::_dynamic_industry_overview` (line 110-165) + `main` (line 185-188)
+- **根因**：
+  1. 原 growth regex `r"([+\-]?\d{1,3}(?:\.\d+)?)\s*%"` 不带上下文 · 容易被 `PE 25%` / `失业率 5%` 抢先匹配 · 且不匹"涨超40%"这类中文财经常见表达
+  2. `penetration` 完全没 regex 抽取路径
+  3. `main` line 187 `penetration` 没 fallback 到 dynamic（只 est 一条路径）
+  4. `all_bodies` 只拼 `body` 不含 `title` · 关键数字常在 title 里（"净利齐涨超40%"）
+- **影响**：所有未被 INDUSTRY_ESTIMATES 硬编码覆盖的 236+ 行业（包括通信设备）三字段全空 · 同时导致 Bug 4 BCG 缺 growth 输入
+- **修法**：
+  1. growth regex 上下文感知 · 关键词含 `增长/增速/CAGR/复合增长/同比/增幅/年均增长/涨超/涨幅/暴涨/翻倍/提升/上升/上涨/净利齐涨` + 0-20 字符 + %
+  2. 加 `tam_context_pat` 优先匹"市场规模/规模达/产业规模/TAM/行业规模" 附近的"XX亿"
+  3. 加 `penetration_heuristic` · 匹"渗透率 XX%" / "XX% 渗透率"
+  4. main line 228 · `penetration = est.get("penetration") or dynamic.get("penetration_heuristic") or "—"` 补兜底
+  5. `all_bodies` 改为拼 `title + body`
+- **验证**：mock search_trusted 返含"增速 42% 预计 CAGR 30%" 的 snippets · `growth_heuristic` 抓到值不是 `—`
+- **回归测试**：`test_industry_growth_regex_picks_context_aware` / `test_industry_penetration_regex_extracts` / `test_industry_penetration_fallback_wired_in_main`
+- **若未来改 fetch_industry**：
+  - 不能去掉上下文关键词直接裸匹 `%`（会被 PE/失业率等噪音抢先）
+  - `penetration_heuristic` 在返回 dict 里必须保留（main 依赖）
+  - `all_bodies` 必须同时拼 title + body（关键数字常在 title）
+
+### BUG · `8_materials.core_material = "类型；类型"` (MX 垃圾数据无过滤)
+- **症状**：原材料板块 `core_material` 显示为"类型；类型"这种 MX prompt 残留噪音
+- **位置**：`run_real_test.py::_autofill_qualitative_via_mx` (line 1047-1068 原版)
+- **根因**：后处理 `_autofill_qualitative_via_mx` 调 MX 妙想 API 填 6 个定性维度时，**直接把 MX 返回 `text` 写入 `data[字段]` 没做质量校验**。MX 偶尔会返回 prompt 模板残留（"类型；类型" / "抱歉，无法回答" / 重复片段）
+- **影响**：6 个定性维度（3_macro/7_industry/8_materials/9_futures/13_policy/15_events）都可能被垃圾数据污染，比空还糟（显示错误数据）
+- **修法**：
+  1. 加 `_is_junk_autofill(text)` 函数 · 检测长度 < 5 / 黑名单短语（类型；类型/抱歉/无法回答/暂无数据/XXX/TODO/null）/ 分号分隔全同片段
+  2. `_AUTOFILL_JUNK_PATTERNS` 模块级常量便于扩展
+  3. MX 和 ddgs 返回后分别过滤 · 垃圾数据 `text = ""` 不写入
+  4. 保留 `_autofill_failed` 标记让 agent/UI 明确知道是"数据不足"
+- **验证**：中际旭创 E2E `core_material` 不再是"类型；类型"（可能是真实 ddgs 结果或 `—`）· 真实数据如"高端光通信收发模块"不被误伤
+- **回归测试**：`test_junk_autofill_catches_type_duplication` / `test_junk_autofill_catches_refusal` / `test_junk_autofill_lets_real_text_through`
+- **若未来改 _autofill_qualitative_via_mx**：
+  - 写入 `data[字段]` 前必须先跑 `_is_junk_autofill(text)` 过滤
+  - 遇到新的 MX 垃圾 pattern（如"未找到"/"NaN"）加到 `_AUTOFILL_JUNK_PATTERNS` 常量
+  - 不能为了"省一次判断"就写无过滤版本 - 比空还糟的数据误导用户
+
+### BUG · BCG 矩阵所有股都归为 "Dog (瘦狗)"
+- **症状**：报告"BCG 矩阵定位"永远显示 Dog 瘦狗 + "考虑剥离/收缩" · 中际旭创作为 CPO 全球龙头被归 Dog 明显错误
+- **位置**：
+  - 计算：`lib/deep_analysis_methods.py::build_competitive_analysis` (line 488-503)
+  - features 源头：`lib/stock_features.py` (line 340-341)
+- **根因**：
+  1. `stock_features.py:340-341` 写死 `f["industry_growth"] = _f(industry.get("growth"), default=10)` 和 `f["market_share"] = _f(industry.get("market_share"), default=10)` · 但 `industry.market_share` key 从未被任何 fetcher 写入 · 永远 default 10 · `industry.growth` 也因 Bug 2 永远 `—` → `_f("—")` = 0 或 default 10
+  2. BCG 阈值 `market_share > 15` + `market_growth > 10` · 默认 10/10 不满足任何 `> 15` 条件 → 必落 Dog
+  3. 阈值 `> 15 市场份额` 对 A 股单股非现实（很少有单股过 15% 市占率）
+- **影响**：所有股票（茅台/中际旭创/宁德时代 etc）BCG 都是 Dog · "Star/Cash Cow/Question Mark"三档形同虚设
+- **修法**：
+  1. `stock_features.py` · 真实计算 `market_share = 公司市值 / 行业总市值 × 100`（数据源：`basic.market_cap_yi` / `industry.cninfo_metrics.total_mcap_yi`）
+  2. `stock_features.py` · `industry_growth` 从 `industry.growth` 字符串 regex 解析 `[+\-]?\d+(?:\.\d+)?%`（Bug 2 修复后 growth 字段有真实值）
+  3. `deep_analysis_methods.py` · BCG 阈值调整：Star `share>3 AND growth>15`、Cash Cow `share>3 AND growth≤15`、Question Mark `share≤3 AND growth>15`、Dog `share≤3 AND growth≤15`
+  4. `default=10` 硬编改为 `default=0` · 让数据缺失时明确落 Dog（而不是假数据误导为 Dog）
+- **验证**：
+  - 中际旭创市值 9455 亿 / 通信设备行业 171648 亿 ≈ 5.5% > 3 · E2E 实测 BCG 升为 `Cash Cow (现金牛)`（growth 若抓到 >15% 则升 Star）
+  - features market_share 5.5 + growth 25 → 单元测试验证归 Star
+  - features share 0.5 + growth 2 → 归 Dog（回归护栏）
+- **回归测试**：`test_stock_features_market_share_real_computation` / `test_bcg_thresholds_updated_for_realistic_a_share` / `test_bcg_classifies_zhongji_as_star` / `test_bcg_classifies_low_growth_small_share_as_dog` / `test_bcg_question_mark_for_high_growth_small_share`
+- **若未来改 BCG / features**：
+  - `stock_features.market_share` 必须真实计算 · 不能回退到 `default=10`
+  - BCG 阈值 A 股上下文下 `share > 3` 是合理线（15% 是非现实）· 不能无理由拉回 15
+  - `default=0` vs `default=10` 语义差异大 · 前者代表缺失（让 agent 识别），后者是假数据（历史 bug 根因）
+  - 依赖链：Bug 4 需 Bug 2 先修好（growth 字段要有真实值）
 
 ---
 
