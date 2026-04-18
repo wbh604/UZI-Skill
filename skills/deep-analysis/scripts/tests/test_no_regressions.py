@@ -545,16 +545,19 @@ def test_top3_bears_rendered():
         "v2.9.1 regression: template 缺 INJECT_TOP3_BEARS"
 
 
-def test_consensus_half_weight_formula():
-    """panel_consensus 必须用半权 neutral 公式（v2.9.1 修的 bug）"""
+def test_consensus_neutral_weighted_formula():
+    """panel_consensus 必须对 neutral 加权计入（v2.9.1 引入半权 0.5，v2.11 校准到 0.6）"""
     src = (SCRIPTS_DIR / "run_real_test.py").read_text(encoding="utf-8")
     # 找 generate_panel 函数体
     fn_idx = src.find("def generate_panel")
     fn_end = src.find("\ndef ", fn_idx + 100)
     body = src[fn_idx:fn_end]
-    # 公式必须体现 neutral 半权
-    assert "0.5 * neutral" in body or "0.5*neutral" in body or "neutral / 2" in body, \
-        "v2.9.1 regression: consensus 公式未实现 neutral 半权"
+    # 公式必须对 neutral 加权（v2.11 起用常量 NEUTRAL_WEIGHT）
+    assert ("NEUTRAL_WEIGHT * neutral" in body or
+            "0.6 * neutral" in body or
+            "0.5 * neutral" in body or
+            "0.5*neutral" in body), \
+        "regression: consensus 公式未对 neutral 加权计入"
     # 老的裸 bullish-only 不该再单独出现
     assert 'sig_dist["bullish"] / max(' not in body, \
         "v2.9.1 regression: 仍有老的 bullish-only 公式"

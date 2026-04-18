@@ -1,9 +1,42 @@
 # BUGS-LOG · 防回归记录
 
 每个 bug 修完都登记到这里。**未来改这些代码区域时，必须回看本文件确保不引入回归。**
-对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py` + `tests/test_v2_10_4_fixes.py`。
+对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py` + `tests/test_v2_10_4_fixes.py` + `tests/test_v2_11_scoring_calibration.py`。
 
-**登记规范**：每个条目必须含 症状 / 位置 / 根因 / 影响 / 修法 / 验证 / 回归测试 / "未来改该区域注意事项"
+**登记规范**：每条必含 症状 / 位置 / 根因 / 影响 / 修法 / 验证 / 回归测试 / "未来改该区域注意事项"
+
+---
+
+## v2.11.0 (2026-04-18 · 评分校准 · 用户反馈驱动)
+
+### BUG · 白马股被评"谨慎"、从未有股能拿"值得重仓"
+- **症状**：
+  - @崔越（微信）："测了几只股票，没有超过 65 分的"
+  - @W.D（微信）："茅台 47 分"
+  - @睡袍布太少（微信）："目前只测到天孚通信超过 65"
+  - 观察：线性评分完全没有 ≥ 85 的股票，"值得重仓"档位形同虚设
+- **位置**：
+  - `run_real_test.py::generate_panel` 的 consensus 公式
+  - `run_real_test.py::generate_synthesis` 的 verdict 阈值
+  - `lib/stock_style.py::apply_style_weights` 的 neutral 权重（需同步）
+- **根因**：
+  1. 51 评委里价值派 6 + 中国价投 6 + 游资 23 = 35 人对大多数股偏保守 → bullish 常仅 5-15 人
+  2. v2.9.1 consensus 公式 `(bullish + 0.5×neutral) / active` neutral 权重 0.5 过低，把 neutral 当"半空头"处理。实际语义是"不坑但不是我心头好"，应接近中位数
+  3. verdict 阈值 85/70/55/40 太严 · 茅台白马实测 fund=62/consensus=37 → overall 47 → 谨慎
+- **影响面**：所有 A 股 / 港股 / 美股。白马股结构性偏低 → 用户失去信心 → 卸载
+- **修法**：
+  1. `generate_panel` · consensus `NEUTRAL_WEIGHT 0.5 → 0.6` + 加 `consensus_formula.version` 诊断字段
+  2. `generate_synthesis` · verdict 阈值 `85/70/55/40 → 80/65/50/35`
+  3. `stock_style.apply_style_weights` · neutral 权重 `w*0.5 → w*0.6`（与 generate_panel 对齐）
+- **验证**（模拟茅台典型 12/20/16/3 分布）：
+  - 旧 consensus = (12 + 10) / 48 × 100 = 45.8 · overall = 62×0.6+45.8×0.4 = 55.5 → 观望
+  - 新 consensus = (12 + 12) / 48 × 100 = 50.0 · overall = 62×0.6+50×0.4 = 57.2 → 观望优先
+  - 对比茅台 47 实测 → 新公式提升 ~10 分，verdict 从 "谨慎" 升到 "观望优先"
+- **回归测试**：`tests/test_v2_11_scoring_calibration.py` 8 个用例 · 护栏 `test_no_regressions.py::test_consensus_neutral_weighted_formula` 兼容 0.5/0.6 两种权重
+- **若未来改 consensus**：
+  - `NEUTRAL_WEIGHT` 必须同时改 `generate_panel` 和 `stock_style.apply_style_weights` 两处（否则加权前后分数不一致）
+  - verdict 阈值任一改动必须跑 `test_verdict_thresholds_are_v2_11_calibrated`
+  - 把 bullish-only 公式改回 `bullish / active` = **禁止**（forum 反馈已明确该公式导致白马结构性偏低）
 
 ---
 

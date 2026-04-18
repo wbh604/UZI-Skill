@@ -1,5 +1,80 @@
 # Release Notes
 
+## v2.11.0 — 2026-04-18 (评分校准 · 用户反馈驱动)
+
+> **论坛 linux.do/t/1981105 + 微信群多位用户反馈"分数偏低"**：@崔越"没超过 65 分"、@W.D"茅台 47 分"、@睡袍布太少"只测到天孚通信超 65"。本版做评分曲线校准。
+
+### 根因
+
+诊断 `run_real_test.py::generate_panel` + `generate_synthesis` 两处公式：
+
+1. **verdict 阈值太严**：`>=85 值得重仓 / >=70 可以蹲 / >=55 观望 / >=40 谨慎 / <40 回避`
+   - 从未有股能 ≥85（"值得重仓"档位形同虚设）
+   - 白马茅台实测 overall=47 → "谨慎"（与白马定位严重不符）
+
+2. **consensus neutral 权重偏低**（v2.9.1 的 0.5 半权公式）：
+   - 51 评委里价值派 6 + 中国价投 6 + 游资 23 = 35 人对多数股偏保守
+   - 白马典型分布 5 bull / 20 neu / 15 bear / 11 skip → `(5+10)/40×100 = 37.5`
+   - neutral 真实语义是"不坑但不是心头好"，不该按 0.5（半空头）处理
+
+### 修复
+
+**1. `generate_panel` · consensus 公式校准**（`run_real_test.py:745`）
+```python
+# v2.9.1: consensus = (bullish + 0.5*neutral) / active × 100
+# v2.11:  consensus = (bullish + 0.6*neutral) / active × 100
+NEUTRAL_WEIGHT = 0.6
+consensus = (bullish + NEUTRAL_WEIGHT * neutral) / max(active_count, 1) * 100
+```
+诊断字段 `consensus_formula.version` 升级到 `v2.11`。
+
+**2. `generate_synthesis` · verdict 阈值下调 5 分**（`run_real_test.py:1165`）
+```
+>=80 值得重仓    (原 85)
+>=65 可以蹲一蹲  (原 70)  ← 用户心里的及格线
+>=50 观望优先    (原 55)
+>=35 谨慎        (原 40)
+<35  回避
+```
+
+**3. `stock_style.apply_style_weights` · neutral 权重对齐**（`lib/stock_style.py:256`）
+- 从 `w * 0.5` → `w * 0.6`（与 generate_panel 对齐，否则风格加权前后 consensus 不一致）
+
+### 预期效果
+
+| 股票典型 | v2.9.1 overall | v2.11 overall | verdict 变化 |
+|---|---|---|---|
+| 白马茅台 (12/20/16/3) | 55.5 | 57.2 | 观望优先 → 观望优先（接近 65 边界） |
+| 真强股 (30/15/3/3) | 72 | 74 | 可以蹲 → **可以蹲** (更稳) |
+| 平庸股 (8/20/18/5) | 44 | 46 | 谨慎 → 观望优先 |
+| 真坑股 (3/10/33/5) | 28 | 30 | 回避 → **回避**（真坑照样识别） |
+
+**重点**：真坑股分数没有被抬高，辨识度反而提升。
+
+### 回归测试
+
+- 新增 `tests/test_v2_11_scoring_calibration.py` · 8 个用例
+  - 阈值硬检查 / ladder 单调 / 茅台典型分布 / NEUTRAL_WEIGHT 常量 / 两处对齐 / 诊断字段 / 0-100 sanity / 边界
+- 更新 `test_no_regressions.py::test_consensus_neutral_weighted_formula` 兼容 0.5/0.6 两种权重
+- 全量 **98 passed**（原 90 + 新 8）
+
+### BUGS-LOG
+
+完整登记在 [docs/BUGS-LOG.md v2.11.0 章节](docs/BUGS-LOG.md#v2110-2026-04-18--评分校准--用户反馈驱动)，含"未来改该区域注意事项"防回归清单。
+
+### README 更新
+
+- 版本号 v2.9 → v2.11
+- 更新日志补齐 v2.10.0-7（4 档）
+- 新增 "🎯 评分校准（v2.11）" 章节
+- Hermes 兼容提示（链到 INSTALL-HERMES.md）
+
+### 升级
+
+`git pull origin main` · 无数据迁移 · 已有 `.cache/` 继续生效。
+
+---
+
 ## v2.10.7 — 2026-04-18 (market 传播 + resume 别名命中 + agent 深浅两路径)
 
 > **Codex 对主线做整体代码审查，发现 v2.10.5 执行链路还有 3 处不符合预期**

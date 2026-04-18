@@ -738,25 +738,30 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
             "what_would_change_my_mind": verdict_obj.get("what_would_change_my_mind", "—"),
         })
 
-    # v2.9.1 · consensus 半权公式修复
-    # 旧公式 bullish / active 把 neutral 当成和 bearish 同样权重（0）
-    # 真实语义：neutral = "我观望"≠"我看空"，应半权计入共识
-    # 修后：consensus = (bullish + 0.5*neutral) / (bullish+neutral+bearish)
+    # v2.11 · consensus neutral 权重校准
+    # v2.9.1 半权公式（neutral 计 0.5）导致 A 股白马结构性偏低 — 51 评委里
+    # 价值派 + 游资合计 35 人对大多数股 neutral/skip，bullish 很难拉上 20 人，
+    # 白马典型 consensus ~37（茅台实测 47 分 → "谨慎"档）。
+    # 真实语义：neutral = "不坑但不是我心头好"，权重应接近中位数 60/100 而非 50/100
+    # 观察论坛+微信反馈（2026-04-18 @崔越 @W.D @睡袍布太少）：用户期望 65 分是及格线
+    # 修后：consensus = (bullish + 0.6*neutral) / active
+    NEUTRAL_WEIGHT = 0.6
     active_count = len(investors_out) - sig_dist.get("skip", 0)
     bullish = sig_dist.get("bullish", 0)
     neutral = sig_dist.get("neutral", 0)
-    consensus = (bullish + 0.5 * neutral) / max(active_count, 1) * 100
+    consensus = (bullish + NEUTRAL_WEIGHT * neutral) / max(active_count, 1) * 100
     return {
         "ticker": raw["ticker"],
         "panel_consensus": round(consensus, 1),
         "vote_distribution": vote_dist,
         "signal_distribution": sig_dist,
         "investors": investors_out,
-        # v2.9.1 · 诊断字段，方便 agent / 自查看到公式
+        # v2.11 · 诊断字段，方便 agent / 自查看到公式
         "consensus_formula": {
-            "version": "v2.9.1 · (bullish + 0.5*neutral) / active",
+            "version": "v2.11 · (bullish + 0.6*neutral) / active",
+            "neutral_weight": NEUTRAL_WEIGHT,
             "bullish": bullish,
-            "neutral_half_weight": neutral / 2,
+            "neutral_weighted": round(neutral * NEUTRAL_WEIGHT, 2),
             "bearish": sig_dist.get("bearish", 0),
             "skip": sig_dist.get("skip", 0),
             "active": active_count,
@@ -1164,10 +1169,13 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
 
     overall = fund_score * 0.6 + consensus * 0.4
 
-    if overall >= 85: verdict_label = "值得重仓"
-    elif overall >= 70: verdict_label = "可以蹲一蹲"
-    elif overall >= 55: verdict_label = "观望优先"
-    elif overall >= 40: verdict_label = "谨慎"
+    # v2.11 · verdict 阈值重校准 · 从未有股能 ≥ 85 (值得重仓档空设)，
+    # 论坛+微信反馈显示用户心理及格线是 65 分（@崔越 @W.D @睡袍布太少 @一印成王）
+    # 调整：85/70/55/40 → 80/65/50/35，让白马/真强股进"可以蹲一蹲"档
+    if overall >= 80: verdict_label = "值得重仓"
+    elif overall >= 65: verdict_label = "可以蹲一蹲"
+    elif overall >= 50: verdict_label = "观望优先"
+    elif overall >= 35: verdict_label = "谨慎"
     else: verdict_label = "回避"
 
     # Pick bull and bear for great divide

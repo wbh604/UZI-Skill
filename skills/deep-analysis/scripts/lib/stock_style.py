@@ -253,7 +253,8 @@ def apply_style_weights(panel_investors: list[dict],
             bullish_w += w
             bullish_n += 1
         elif sig == "neutral":
-            neutral_w += w * 0.5    # neutral 半权计入
+            # v2.11 · neutral 权重 0.5 → 0.6（与 generate_panel 对齐，修正 A 股白马偏低）
+            neutral_w += w * 0.6
             neutral_n += 1
         else:
             bearish_n += 1

@@ -12,11 +12,13 @@
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-17-red)]()
 [![Self-Review](https://img.shields.io/badge/Self--Review-13%20checks-blueviolet)](skills/deep-analysis/scripts/lib/self_review.py)
 
-A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.9 机械级 agent 自查**
+A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.11 评分校准 + v2.10 三档思考深度 + Hermes 兼容**
 
-[安装](#安装) · [用法](#用法) · [评审团](#-51-位评审团) · [机构方法](#-17-种机构级方法) · [自查 gate 🆕](#-机械级自查-gatev29-起) · [报告截图](#-报告长什么样) · [FAQ](#-faq) · [入群交流测试](#-测试交流群)
+[安装](#安装) · [用法](#用法) · [三档深度](#-三档思考深度v2103-新增) · [Hermes 🆕](INSTALL-HERMES.md) · [评审团](#-51-位评审团) · [机构方法](#-17-种机构级方法) · [自查 gate](#-机械级自查-gatev29-起) · [报告截图](#-报告长什么样) · [FAQ](#-faq) · [入群交流测试](#-测试交流群)
 
 **中文** | [English](README_EN.md)
+
+**Hermes 用户**：`hermes skills install wbh604/UZI-Skill/skills/deep-analysis` 即可。详见 [INSTALL-HERMES.md](INSTALL-HERMES.md)（基于 `hermes-compat` 分支）。
 
 </div>
 
@@ -177,6 +179,31 @@ agent 会自动用 `--remote` 启动 Cloudflare Tunnel，给你一个 `https://x
 | `/quick-scan 002273` | 30 秒速判 |
 | `/panel-only 600519` | 只看 51 评委投票 |
 | `/scan-trap 002273` | 杀猪盘排查 |
+
+---
+
+## 🎯 评分校准（v2.11）
+
+用户反馈"茅台 47 分"、"没超过 65 分"—— 诊断发现两处公式偏严苛，v2.11 校准：
+
+| 改动 | 旧 (v2.9.1) | 新 (v2.11) | 影响 |
+|---|---|---|---|
+| **verdict 阈值** | 85/70/55/40 | **80/65/50/35** | 从未有股能 ≥85（"值得重仓"档空设），下调 5 分让白马/真强股进"可以蹲一蹲"档 |
+| **consensus neutral 权重** | 0.5（半权） | **0.6** | 51 评委里价值派+游资 35 人偏保守，neutral 权重 0.5 让白马 consensus 仅 37，0.6 更贴近"不坑但不是心头好"的真实语义 |
+
+公式（未变）：`overall = fund_score × 0.6 + consensus × 0.4`
+
+典型白马（如茅台）预期：
+- v2.9.1：`fund=62 consensus=45 → overall 55 → 观望优先`
+- v2.11：`fund=62 consensus=50 → overall 57 → 观望优先`（但更接近"可以蹲一蹲"边界，白马行情启动时容易进 65）
+
+两档合计影响 ~5-8 分。**真正的坑仍会 < 35 → 回避**，分数辨识度不降反升。
+
+诊断字段 `panel.json::consensus_formula.version = "v2.11 · (bullish + 0.6*neutral) / active"` 可审计。
+
+回归测试：`tests/test_v2_11_scoring_calibration.py` 8 个用例。
+
+完整校准记录见 [BUGS-LOG.md v2.11.0 章节](docs/BUGS-LOG.md#v2110-2026-04-18--评分校准--用户反馈驱动)。
 
 ---
 
@@ -585,7 +612,14 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
-| **v2.9.0** | 2026-04-17 | **机械级 agent 自查 gate**：13 条自动检查 + `assemble_report` 入口强制 block critical → 修完再出 HTML · fetch_industry 动态 `search_trusted`（236 个行业不再是"—"）· HK industry_pe fallback |
+| **v2.11.0** | 2026-04-18 | **评分校准（用户反馈驱动）**：论坛+微信反馈"茅台 47 分"、"没超过 65 分" → verdict 阈值 `85/70/55/40 → 80/65/50/35`；consensus neutral 权重 `0.5 → 0.6`（A 股白马结构性偏低问题）；`stock_style` 同步对齐 |
+| **v2.10.7** | 2026-04-18 | **Codex 审查 3 处修复**：`raw.market` 硬编"A"污染 HK/US · `resume` 对别名输入失效（中文名/三位港股 cache 不命中）· AGENTS.md 强制全量流程与 CLI/lite 降载设计冲突 → 深浅两路径决策树 |
+| **v2.10.6** | 2026-04-18 | **Providers 框架实际落地**：v2.10.3 建的 5 provider 链（akshare/efinance/tushare/baostock/direct_http）实际接入 `data_sources.py` K 线链 · Tushare kline 补齐 · `hermes skills install` 风格 health CLI |
+| **v2.10.5** | 2026-04-18 | **v2.10.4 遗漏补丁**：`check_coverage_threshold` profile-aware（lite 不再结构性偏低）· `run.py` 自动 `UZI_CLI_ONLY=1`（medium/deep CLI 直跑也出报告）· `render_fund_managers` None 字段兜底 |
+| **v2.10.4** | 2026-04-17 | **Codex 测试反馈 3 bug**：lite 模式 self-review 9 critical 误报 · `agent_analysis.json` 缺失 CLI 直跑误报 critical · ETF 早退 `RuntimeError: Stage 2 缺少数据` |
+| **v2.10.3** | 2026-04-18 | **三档思考深度**：`lite` (30s-2min · 7 维 + 10 投资者) / `medium` (2-4min · 默认 · 22 维 + 51 投资者) / `deep` (15-20min · 含 Bull-Bear 辩论 + Segmental) · `--depth` CLI arg · direct_http provider（腾讯/新浪/etnet 直连脱离 akshare） |
+| **v2.10.0-2** | 2026-04-18 | 首次安装 + Codex 机器耗时/token 优化 · `lib/net_timeout_guard` 4 层网络超时保护（代理/GFW 不通快速 fail） · Fund holders 双层策略（Top N full + rest lite） · 首次运行 10-15min → 2-4min |
+| **v2.9.x** | 2026-04-17 | **机械级 agent 自查 gate**：13 条自动检查 + `assemble_report` 入口强制 block critical → 修完再出 HTML · fetch_industry 动态 `search_trusted`（236 个行业不再是"—"）· HK industry_pe fallback · consensus 半权公式 |
 | **v2.8.x** | 2026-04-17 | **BUG#R10 修复** 行业分类碰撞（工业金属→农副食品加工）· 134 条申万→证监会硬映射 · 22 位海外人物真实原话 + URL 溯源 · 每评委自己方法论回答 3 字段 · English README · Munger/Alibaba hook |
 | **v2.7.x** | 2026-04-17 | HK financials 实现（BUG#R7）· HK kline fallback 链（BUG#R8）· wave2 flush（BUG#R9）· 风格动态加权 7+1 · 量化结构性识别（top-1<2%）· XueQiu 登录 opt-in · 14 权威数据源 + search_trusted |
 | **v2.6.x** | 2026-04-17 | agent 闭环写回 · `agent_analysis.json` 合并 · dim_commentary · 22 维覆盖 |
