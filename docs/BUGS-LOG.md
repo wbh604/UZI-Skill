@@ -1,7 +1,117 @@
 # BUGS-LOG · 防回归记录
 
 每个 bug 修完都登记到这里。**未来改这些代码区域时，必须回看本文件确保不引入回归。**
-对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py`。
+对应单元测试在 `skills/deep-analysis/scripts/tests/test_no_regressions.py` + `tests/test_v2_10_4_fixes.py`。
+
+**登记规范**：每个条目必须含 症状 / 位置 / 根因 / 影响 / 修法 / 验证 / 回归测试 / "未来改该区域注意事项"
+
+---
+
+## v2.10.7 (2026-04-18 · Codex 整体审查发现执行链路 3 处)
+
+### BUG · `raw["market"]` 硬编 "A" 污染 HK/US 路径
+- **症状**：`python run.py 00700.HK --depth lite` Self-Review 显示 `(A)`，应为 `(H)`；后续市场分支判断全错
+- **位置**：`skills/deep-analysis/scripts/run_real_test.py::collect_raw_data` 入口 + post-fetch_basic 回填逻辑
+- **根因**：
+  1. 初始化时硬编码 `raw["market"] = "A"`
+  2. post-fetch_basic 回填只在 `resolved_ticker != ticker` 分支里触发（用户直接输入 `00700.HK` 时 resolved == input，不触发）
+  3. 回填读的是 `dims["0_basic"].get("data", {}).get("market", "A")`，但 fetch_basic 实际把 market 放在**顶层**（见 fetch_basic.py:80 `"market": ti.market`），不在 `.data` 里
+- **影响**：所有 HK/US 直输 + 所有 resume cache 走 raw 的场景，`raw.market` 都被污染为 A
+- **修法**：
+  1. 入口用 `parse_ticker(ticker).market` 预填（非中文名即可拿到 H/U）
+  2. post-fetch_basic 改为**无条件**从 `dims["0_basic"].get("market")` 顶层回填
+  3. resume 从 cache 复用时也回填 `raw["market"]`
+- **验证**：`python run.py 00700.HK --depth lite` Self-Review 显示 `(H)` ✅
+- **回归测试**：`test_v2_10_4_fixes.py::test_raw_market_initialized_from_parse_ticker`
+- **若未来改 collect_raw_data**：不能把 market 硬编码回 "A"；不能把顶层 market 改回读 `.data.market`；新增 resume 路径必须同步回填 market
+
+### BUG · `resume` cache 对别名输入失效
+- **症状**：用户用中文名 "贵州茅台" 或三位港股 "700" 输入时，`.cache/600519.SH/raw_data.json` 已存在也不命中缓存，重跑 Stage 1 耗时 + token 双爆
+- **位置**：`run_real_test.py::collect_raw_data` 的 resume cache 加载块（line ~107-114）
+- **根因**：注释写"尝试用原始 ticker 和 resolved ticker 都查"，实际只 `_read_cache(ticker, "raw_data")` 调了一次，发生在 fetch_basic 解析之前
+- **影响**：别名输入下 resume 形同虚设；Codex 等 agent 环境反复耗 token 重跑
+- **修法**：双重查询——先 `_read_cache(ticker)` 原样查；未命中 + 非中文名则 `_read_cache(parse_ticker(ticker).full)` 兜底
+- **验证**：`python run.py 00700.HK`（cache 存在）→ 命中 15/15 维
+- **回归测试**：`test_v2_10_4_fixes.py::test_resume_cache_tries_resolved_ticker`
+- **若未来改 resume 路径**：不能移除 `parse_ticker.full` 兜底查询；中文名输入走 fetch_basic resolver 不在 resume 范畴内
+
+### BUG · AGENTS.md 强制全量 agent 流程 · 抵消 CLI/lite 降载设计
+- **症状**：v2.10.4/5 已把 `agent_analysis.json` 缺失降 warning 允许 CLI 直跑出报告，但 AGENTS.md 仍让 agent 看到"分析 XXX"就无条件 role-play 51 评委 + 写 agent_analysis.json，token 浪费
+- **位置**：`AGENTS.md` Step 1-5 + `CLAUDE.md` "工作流" 段落
+- **根因**：v2.10.4/5 是代码侧改，文档没同步更新
+- **修法**：加"深浅两路径"决策树：
+  - 快速路径（默认）：`python3 run.py <ticker> --depth lite/medium --no-browser` → 30s-4min 出完整报告，**不需要** role-play
+  - 深度路径：仅当用户明确要 DCF / IC memo / 首次覆盖等深度产物时走两段式
+- **若未来改 agent 流程**：run.py 的 CLI 直跑路径必须保持"缺 agent_analysis.json 降 warning 继续出 HTML"；文档里必须保留深浅两路径说明
+
+---
+
+## v2.10.5 (2026-04-18 · v2.10.4 遗漏补丁)
+
+### BUG · `check_coverage_threshold` 非 profile-aware 阻塞 lite 出报告
+- **症状**：`python run.py 600519.SH --depth lite --no-browser` 跑出 `coverage=17% (3/18)` → critical → `RuntimeError: BLOCKED by self-review`，HTML 生成失败
+- **位置**：`skills/deep-analysis/scripts/lib/self_review.py::check_coverage_threshold:254`
+- **根因**：分母用全 18 项 `CRITICAL_CHECKS`，lite 只启用 7 维，结构性偏低；CLI 直跑模式又没 agent 可补数据，critical 把流程卡死
+- **影响**：任何 lite 模式 + 网络稍差的组合 → 报告 block
+- **修法**：
+  1. Profile-aware 分母：只算 `profile.fetchers_enabled` 里的 CRITICAL_CHECKS 项
+  2. CLI-only/lite 模式下 `< 40%` 的 critical 降为 warning（允许继续出 HTML 供参考）
+- **验证**：600519.SH lite → `critical=0 warning=2`，HTML 生成 ✅
+- **回归测试**：
+  - `test_v2_10_4_fixes.py::test_coverage_critical_downgrades_in_lite`
+  - `test_v2_10_4_fixes.py::test_coverage_critical_preserved_in_medium`（回归护栏 · medium 仍 critical）
+  - `test_v2_10_4_fixes.py::test_coverage_profile_aware_denominator`
+- **若未来改 self_review**：分母必须读 profile，不能退回硬编码 18；CLI 模式下 critical 降级逻辑不能删
+
+### BUG · `run.py` 直跑模式未自动标记 UZI_CLI_ONLY
+- **症状**：`python run.py 002273.SZ --depth medium` → `agent_analysis` 缺失仍 critical → block HTML
+- **位置**：`run.py::main()` 环境变量设置区
+- **根因**：CLI 降级逻辑依赖 `UZI_DEPTH=lite / UZI_LITE=1 / UZI_CLI_ONLY=1 / CI=true` 四个信号；medium 模式都不命中
+- **修法**：run.py main() 开头加 `os.environ.setdefault("UZI_CLI_ONLY", "1")` — run.py 是 CLI 直跑入口（agent 流程走 stage1/stage2 直接调用，不经 run.py）
+- **验证**：002273.SZ medium → HTML 生成 ✅
+- **回归测试**：`test_v2_10_4_fixes.py::test_run_py_sets_cli_only_env`
+- **若未来改 run.py**：不能删 UZI_CLI_ONLY=1 setdefault；若新增 agent 专用入口必须另设标志区分
+
+### BUG · `render_fund_managers` None 字段 TypeError
+- **症状**：`TypeError: '>' not supported between instances of 'NoneType' and 'int'` in `assemble_report.py:1844`
+- **位置**：`skills/deep-analysis/scripts/assemble_report.py::render_fund_managers`（5 处字段）
+- **根因**：v2.10.2 fund_holders 双层策略（Top N full + rest lite）下，rest lite 基金的 `return_5y/annualized_5y/max_drawdown/sharpe/peer_rank_pct` 为 **显式 None**，但 `m.get("return_5y", 0)` 只处理 key 缺失、不处理值为 None
+- **影响**：所有 lite + fund holders ≥ N+1 的场景 → 报告组装崩溃
+- **修法**：`m.get("return_5y") or 0` 统一兜底（既处理缺失又处理 None）
+- **验证**：`run.py 002273.SZ --depth medium` 正常生成 HTML
+- **若未来改 fund_holders schema**：数值字段保持"None = 未计算"语义；新增数值字段 render 时必须用 `or 0` 不能用 `.get(k, 0)`
+
+---
+
+## v2.10.4 (2026-04-17 · Codex 测试反馈 3 bug)
+
+### BUG · lite 模式与 self-review 冲突（9 critical 误报）
+- **症状**：`UZI_DEPTH=lite` 跑完 gate 报 9 个 critical（维度缺失、data 为空）
+- **位置**：`lib/self_review.py::check_all_dims_exist` + `::check_empty_dims`
+- **根因**：硬编码检查全 20 维，不看 profile；lite 只启用 7 维，其余 13 维被误报 critical
+- **修法**：两函数都读 `analysis_profile.get_profile().fetchers_enabled`，只检查启用的维度
+- **回归测试**：
+  - `test_check_all_dims_lite_respects_profile`
+  - `test_check_empty_dims_lite_respects_profile`
+  - `test_check_all_dims_medium_still_reports_missing`（护栏）
+- **若未来加 self-review check**：新 check 涉及维度遍历必须 profile-aware
+
+### BUG · agent_analysis.json 缺失在 CLI 直跑误报 critical
+- **症状**：`python run.py` 直跑（无 agent 介入）必定 critical 阻止 HTML
+- **位置**：`lib/self_review.py::check_agent_analysis_exists`
+- **修法**：`UZI_DEPTH=lite / UZI_LITE=1 / UZI_CLI_ONLY=1 / CI=true` 任一命中 → 降 warning
+- **回归测试**：`test_agent_analysis_missing_downgrades_in_lite` + `test_agent_analysis_missing_critical_in_medium`（护栏）
+- **若未来改：** 正常两段式流程 agent_analysis 缺失仍是 critical，不能一刀切降级
+
+### BUG · ETF 早退 RuntimeError（stage1 已识别非股，stage2 仍被调用）
+- **症状**：`python run.py 512400.SH` → stage1 写 `_resolve_error.json` 识别为 ETF，但 `run_real_test.main()` 仍调 stage2 → `RuntimeError: Stage 2 缺少数据`
+- **位置**：`run_real_test.py::main()` + `run.py::main()` 两处
+- **修法**：
+  1. `run_real_test.main()` 加 `status == "non_stock_security"` 分支，跳过 stage2 并 return
+  2. `run.py::main()` 捕获 `run_analysis()` 返回的 `non_stock_security` dict，打印成分股提示后 `sys.exit(0)`
+  3. 中文名输入路径同样捕获
+- **回归测试**：`test_main_returns_early_on_non_stock_security` + `test_main_returns_early_on_name_not_resolved`
+- **若未来加新的"非个股"类别**：早退 status 加到 `main()` 的分支列表里，不要让 stage2 被白白调用
 
 ---
 
