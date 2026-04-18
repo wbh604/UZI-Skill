@@ -2,6 +2,13 @@
 
 UZI-Skill 采用多数据源 + 自动 failover 架构 (v2.10.3 起)。本文档列出**所有能接入**的 providers 及配置方法。
 
+**v2.10.6**：providers chain 正式被 `data_sources._kline_a_share_chain` 调用（此前 0 采用）。诊断工具：
+```bash
+python -m lib.providers              # 看所有 provider 健康度
+python -m lib.providers chain A      # 看 A 股每个维度的优先级链
+UZI_PROVIDERS_KLINE=baostock,akshare python -m lib.providers chain A kline
+```
+
 ## 优先级模型
 
 每个 fetcher 请求时，按这个顺序尝试：

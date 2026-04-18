@@ -1,5 +1,61 @@
 # Release Notes
 
+## v2.10.6 — 2026-04-18 (providers 框架实际落地 + Tushare kline + health CLI)
+
+> **审计发现 v2.10.3 的 providers 框架 0% 被调用**。五个 provider 写好了没 fetcher 用，akshare 挂了照样全部崩。本版把它接进 `data_sources.py` 的 K 线链，让 tushare/efinance 真正作为兜底层参与进来。
+
+### 核心改动
+
+**1. `providers.try_chain(method, dim, market, *args)` 助手**
+- 一行调用拿 `(data, provider_name)`，按 `UZI_PROVIDERS_<DIM>` env 排序
+- `ProviderError` 统一兜底，最后一个 provider 失败才抛
+- 方法未实现的 provider 自动跳过（不崩）
+
+**2. `_kline_a_share_chain` 新增第 7 层兜底 · providers chain**
+- 前 6 层（akshare-em / akshare-sina / baostock / 东财 HTTP / 新浪 HTTP / 腾讯 HTTP）都挂时
+- 自动调 `try_chain("fetch_kline_a", "kline", "A", ...)` 让 tushare/efinance 救场
+- 打印 `[kline] 所有默认源失败，providers/tushare 救场 (XXX 根)` 便于诊断
+
+**3. tushare provider 补齐 `fetch_kline_a`**
+- `pro.daily + adj_factor` 做前复权，字段统一成中文列名
+- 之前只有 financials/top10/lhb/北向，**K 线完全缺**——当 akshare 全线挂时 tushare 也救不了
+- 现在 tushare 是 A 股 K 线的官方级兜底
+
+**4. Provider 健康诊断 CLI：`python -m lib.providers`**
+```
+  name         avail  key req  markets
+  akshare      ✓      no       A,H,U
+  baostock     ✓      no       A
+  direct_http  ✓      no       A,H,U
+  efinance     ✓      no       A,H,U
+  tushare      ✗      yes      A        ← 提示用户如何配 TUSHARE_TOKEN
+```
+- `python -m lib.providers chain A kline` · 看某维度 provider 优先级
+- `UZI_PROVIDERS_KLINE=baostock,akshare` 可交互验证 env 覆盖
+
+### 为什么这版重要
+
+v2.10.3 写好的 5 个 provider 是**死代码**：16 个 fetcher 仍直接 `import akshare as ak`。
+真遇到 GFW 把 push2his/push2.eastmoney 全 timeout 的场景，tushare 已经拿到数据了也白瞎。
+v2.10.6 是第一次让 providers 真正参与救场。下一版会把 basic/financials 也接上。
+
+### 测试
+
+- 8 个新 `tests/test_providers_chain.py` 用例：try_chain 成功/失败/跳过、env 覆盖、tushare 方法存在性、health 结构、Protocol 合规
+- 原 80 用例全绿 → 88 passing
+- CLI 实测 `python -m lib.providers` + `chain A` 两个子命令 OK
+
+### 文件清单
+
+- 新增 `skills/deep-analysis/scripts/lib/providers/__main__.py` (health CLI)
+- 新增 `skills/deep-analysis/scripts/tests/test_providers_chain.py` (8 tests)
+- 修改 `lib/providers/__init__.py` (加 `try_chain`)
+- 修改 `lib/providers/tushare_provider.py` (加 `fetch_kline_a`)
+- 修改 `lib/data_sources.py` (_kline_a_share_chain 第 7 层接 providers)
+- 修改 `docs/DATA-PROVIDERS.md` (诊断 CLI 使用说明)
+
+---
+
 ## v2.10.5 — 2026-04-18 (coverage threshold profile-aware + CLI 直跑 HTML 生成)
 
 > **本地真机测试发现 v2.10.4 还有 3 处漏修 · 一次性补完**

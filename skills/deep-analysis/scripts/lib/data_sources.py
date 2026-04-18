@@ -782,6 +782,23 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
         except Exception as e:
             errors.append(f"tencent-direct: {e}")
 
+    # ── 7. v2.10.6 · providers chain (tushare / efinance) 作为最末层兜底
+    # 只在前 6 层都失败后跑：tushare 需要 TUSHARE_TOKEN，efinance 需要 pip
+    try:
+        from lib.providers import try_chain, ProviderError as _PE
+        try:
+            rows, src = try_chain(
+                "fetch_kline_a", dim="kline", market="A",
+                code=code, period=period, start=start, adjust=adjust,
+            )
+            if rows:
+                print(f"    [kline] 所有默认源失败，providers/{src} 救场 ({len(rows)} 根)")
+                return rows
+        except _PE as e:
+            errors.append(f"providers: {e}")
+    except ImportError:
+        pass
+
     # ── All failed
     return [{"_kline_fetch_error": "; ".join(errors) or "no source available"}]
 

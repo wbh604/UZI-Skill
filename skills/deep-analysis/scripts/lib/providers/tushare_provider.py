@@ -88,6 +88,50 @@ class _TushareProvider:
         except Exception as e:
             raise ProviderError(f"tushare.financials: {e}")
 
+    def fetch_kline_a(self, code: str, period: str = "daily", start: str = "20200101", adjust: str = "qfq") -> list[dict]:
+        """A 股日线 · v2.10.6 新增 · 让 kline chain 有 tushare 作为最后一层兜底.
+
+        pro.daily 给未复权价 + adj_factor；我们做后复权/前复权的朴素还原。
+        字段统一成 data_sources 链里的中文列名，和 akshare 保持一致。
+        """
+        try:
+            pro = self._get_pro()
+            ts_code = self._ts_code(code)
+            # 取日线（未复权）
+            df = pro.daily(ts_code=ts_code, start_date=start)
+            if df is None or df.empty:
+                raise ProviderError("tushare.daily empty")
+            # qfq 处理：拉 adj_factor 做前复权
+            if adjust == "qfq":
+                try:
+                    adj = pro.adj_factor(ts_code=ts_code, start_date=start)
+                    if adj is not None and not adj.empty:
+                        latest_factor = float(adj.iloc[0]["adj_factor"])
+                        df = df.merge(adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
+                        ratio = df["adj_factor"] / latest_factor
+                        for col in ("open", "high", "low", "close", "pre_close"):
+                            if col in df.columns:
+                                df[col] = df[col] * ratio
+                except Exception:
+                    pass  # 复权失败就返回未复权
+            rows = []
+            for _, r in df.sort_values("trade_date").iterrows():
+                rows.append({
+                    "日期": str(r["trade_date"])[:4] + "-" + str(r["trade_date"])[4:6] + "-" + str(r["trade_date"])[6:8],
+                    "开盘": float(r.get("open", 0) or 0),
+                    "收盘": float(r.get("close", 0) or 0),
+                    "最高": float(r.get("high", 0) or 0),
+                    "最低": float(r.get("low", 0) or 0),
+                    "成交量": float(r.get("vol", 0) or 0),
+                    "成交额": float(r.get("amount", 0) or 0),
+                    "涨跌幅": float(r.get("pct_chg", 0) or 0),
+                })
+            return rows
+        except ProviderError:
+            raise
+        except Exception as e:
+            raise ProviderError(f"tushare.kline: {e}")
+
     def fetch_top10_holders(self, code: str) -> list[dict]:
         """前十大流通股东."""
         try:

@@ -102,6 +102,57 @@ def get_provider_chain(dim: str, market: str = "A") -> list[Provider]:
     return chain
 
 
+def try_chain(
+    method: str,
+    dim: str,
+    market: str = "A",
+    *args,
+    **kwargs,
+) -> tuple[Any, str]:
+    """按 provider 优先级链依次调用 `method`，返回 (data, provider_name).
+
+    v2.10.6 · 让 fetcher 一行调用就能享受多源 failover：
+
+        from lib.providers import try_chain
+        try:
+            rows, src = try_chain("fetch_kline_a", dim="kline", market="A", code="600519")
+            print(f"拿到 {len(rows)} 根 K 线，来源 {src}")
+        except ProviderError:
+            # 所有 provider 都失败，再走老的硬编码链
+
+    Args:
+      method: provider 上的方法名（如 "fetch_financials_a"）
+      dim:    维度关键字，用于读 UZI_PROVIDERS_<DIM> env 覆盖顺序
+      market: "A" / "H" / "U"
+      *args, **kwargs: 转发给 provider.method(...)
+
+    Raises:
+      ProviderError: 所有可用 provider 都失败（附最后一个错误）
+    """
+    chain = get_provider_chain(dim, market)
+    if not chain:
+        raise ProviderError(f"[{dim}/{market}] 无可用 provider（检查 TUSHARE_TOKEN / pip install）")
+    errors: list[str] = []
+    for p in chain:
+        fn = getattr(p, method, None)
+        if fn is None:
+            errors.append(f"{p.name}: 未实现 {method}")
+            continue
+        try:
+            data = fn(*args, **kwargs)
+            return data, p.name
+        except ProviderError as e:
+            errors.append(f"{p.name}: {e}")
+            continue
+        except Exception as e:
+            # provider 实现里漏抛 ProviderError 的兜底
+            errors.append(f"{p.name}: {type(e).__name__}: {e}")
+            continue
+    raise ProviderError(
+        f"[{dim}/{market}] 所有 provider 都失败: " + " | ".join(errors[:3])
+    )
+
+
 def health_check() -> dict[str, dict]:
     """返回每个 provider 的健康度 + 诊断信息."""
     out = {}
