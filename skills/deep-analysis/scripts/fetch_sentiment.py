@@ -57,6 +57,23 @@ def main(ticker: str) -> dict:
     big_v_text = " ".join(s.get("body", "") for s in snippets.get("big_v", []))
     big_v_count = sum(1 for kw in ["万粉", "百万", "博主", "专家"] if kw in big_v_text)
 
+    # v2.12 · 6 平台热榜命中检测（补 ddgs 盲区：weibo/zhihu/baidu/douyin/toutiao/bilibili）
+    # get_hot_mentions 内部自动派生简称（"贵州茅台" → 同时匹配"贵州"和"茅台"）
+    hot_trend_mentions: dict = {}
+    try:
+        from lib.hottrend import get_hot_mentions
+        hot_trend_mentions = get_hot_mentions(name)
+    except Exception as _e:
+        hot_trend_mentions = {
+            "stock_name": name,
+            "error": f"hottrend 模块异常: {type(_e).__name__}: {str(_e)[:60]}",
+            "total_hits": 0,
+        }
+
+    # heat 分数融合：ddgs hits + 热榜命中（每个热榜命中 +5 分）
+    hot_bonus = (hot_trend_mentions.get("total_hits", 0) or 0) * 5
+    heat = min(100, heat + hot_bonus)
+
     return {
         "ticker": ti.full,
         "data": {
@@ -69,8 +86,11 @@ def main(ticker: str) -> dict:
             "platform_snippets": snippets,
             "platform_hits": platform_hit,
             "total_mentions": total_hits,
+            # v2.12 · 社交热榜额外信号（散户情绪 · 补 ddgs 盲区）
+            "hot_trend_mentions": hot_trend_mentions,
+            "hot_trend_hit_count": hot_trend_mentions.get("total_hits", 0),
         },
-        "source": "web_search:ddgs (多平台 site: query)",
+        "source": "web_search:ddgs (多平台 site: query) + hottrend (v2.12 · 6 热榜)",
         "fallback": False,
     }
 

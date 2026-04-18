@@ -385,8 +385,35 @@ Bull ¥26.95 / Base ¥20.73 / Bear ¥14.51，每个情景有概率和假设。
 | 港股 | akshare hk | yfinance |
 | 美股 | yfinance | akshare us |
 | 宏观 / 政策 / 舆情 / 杀猪盘 | DuckDuckGo web search | — |
+| **社交热榜**（v2.12 新增） | **微博 / 知乎 / 百度 / 抖音 / 头条 / B 站 · 各平台官方 JSON API** | 5min 文件缓存 · 单平台失败不影响其他 |
 
 多层 fallback 链 — 一个源挂了自动切下一个。
+
+### 📱 6 平台社交热榜（v2.12 新增）
+
+散户情绪和杀猪盘题材经常先在抖音/小红书/微博发酵，DuckDuckGo 扫不到。v2.12 起 `17_sentiment` 维度自动查：
+
+- **微博热搜** · 抓 `weibo.com/ajax/side/hotSearch` · 50 条实时热搜
+- **知乎热榜** · 抓 `zhihu.com/api/v3/feed/topstory/hot-list-web` · 50 条
+- **百度热搜** · 抓 `top.baidu.com/api/board` · 实时榜单
+- **抖音热点** · 抓 `douyin.com/aweme/v1/web/hot/search/list/` · 搜索热点
+- **头条热榜** · 抓 `toutiao.com/hot-event/hot-board/` · 热点事件
+- **B 站热搜** · 抓 `s.search.bilibili.com/main/hotword` · 全站热搜
+
+股票名（含简称，如"贵州茅台"→"贵州"/"茅台"）在热榜标题里命中 → 计入情绪热度 + 记录具体条目。
+
+数据结构：synthesis 的 `17_sentiment.data.hot_trend_mentions`：
+```json
+{
+  "stock_name": "贵州茅台",
+  "platforms_ok": 6,
+  "total_hits": 3,
+  "by_platform_count": {"weibo": 2, "zhihu": 1, ...},
+  "mentions": { "weibo": [{"rank":3, "title":"茅台 1499 回归", ...}], ... }
+}
+```
+
+> 致谢：本模块设计参考了 [run-bigpig/jcp](https://github.com/run-bigpig/jcp) (韭菜盘 AI) 的 `hottrend` 服务实现。
 
 ### 🔑 可选：东方财富妙想 Skills API（v2.3 新增）
 
@@ -612,6 +639,7 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| **v2.12.0** | 2026-04-18 | **6 平台社交热榜聚合**：微博/知乎/百度/抖音/头条/B站 官方 API + 5min 文件缓存 + 单平台失败不影响其他 · `17_sentiment` 维度新增 `hot_trend_mentions` 字段补 DuckDuckGo 盲区 · 抄 jcp/hottrend 设计 · 17 个专项测试 |
 | **v2.11.0** | 2026-04-18 | **评分校准（用户反馈驱动）**：论坛+微信反馈"茅台 47 分"、"没超过 65 分" → verdict 阈值 `85/70/55/40 → 80/65/50/35`；consensus neutral 权重 `0.5 → 0.6`（A 股白马结构性偏低问题）；`stock_style` 同步对齐 |
 | **v2.10.7** | 2026-04-18 | **Codex 审查 3 处修复**：`raw.market` 硬编"A"污染 HK/US · `resume` 对别名输入失效（中文名/三位港股 cache 不命中）· AGENTS.md 强制全量流程与 CLI/lite 降载设计冲突 → 深浅两路径决策树 |
 | **v2.10.6** | 2026-04-18 | **Providers 框架实际落地**：v2.10.3 建的 5 provider 链（akshare/efinance/tushare/baostock/direct_http）实际接入 `data_sources.py` K 线链 · Tushare kline 补齐 · `hermes skills install` 风格 health CLI |

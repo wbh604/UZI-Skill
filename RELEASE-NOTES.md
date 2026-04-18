@@ -1,5 +1,76 @@
 # Release Notes
 
+## v2.12.0 — 2026-04-18 (6 平台社交热榜聚合)
+
+> **参考 [run-bigpig/jcp](https://github.com/run-bigpig/jcp)（韭菜盘 AI · 851 ⭐）的 `internal/services/hottrend` 设计，补 DuckDuckGo web search 的盲区**
+
+### 背景
+
+v2.11 的 `17_sentiment` 维度主要靠 ddgs（DuckDuckGo + site: 限定），但：
+- 抖音/快手/小红书/B 站 retail investor 集中地在 ddgs 爬不到
+- 散户情绪和杀猪盘题材经常先在这些平台发酵
+
+jcp 已经开源了 6 平台热榜聚合，直接抄过来。
+
+### 新增
+
+**`skills/deep-analysis/scripts/lib/hottrend.py`** (~240 行)
+
+| 平台 | API | 返回 |
+|---|---|---|
+| 微博 | `weibo.com/ajax/side/hotSearch` | 50 条实时热搜 |
+| 知乎 | `zhihu.com/api/v3/feed/topstory/hot-list-web` | 50 条热榜 |
+| 百度 | `top.baidu.com/api/board?platform=wise&tab=realtime` | 实时榜单 |
+| 抖音 | `douyin.com/aweme/v1/web/hot/search/list/` | 搜索热点 |
+| 头条 | `toutiao.com/hot-event/hot-board/` | 热点事件 |
+| B 站 | `s.search.bilibili.com/main/hotword?limit=50` | 全站热搜 |
+
+**核心 API**：
+```python
+from lib.hottrend import get_hot_mentions
+result = get_hot_mentions("贵州茅台")
+# → {"total_hits": 3, "by_platform_count": {"weibo": 2, ...}, "mentions": {...}}
+```
+
+自动派生简称（"贵州茅台" 同时匹配 "贵州" 和 "茅台"），覆盖品牌简称。
+
+**特性**：
+- 5min 文件缓存（跟 jcp 一致 TTL）
+- 单平台失败不影响其他（每个 fetcher 独立 try/except）
+- `UZI_HTTP_TIMEOUT` 默认 20s 超时
+- 每平台用不同 UA（抄 jcp 反爬策略）
+
+### 接入
+
+**`fetch_sentiment.py`** · 17_sentiment 维度：
+- 末尾调用 `get_hot_mentions(name)`
+- 输出字段 `data.hot_trend_mentions` + `data.hot_trend_hit_count`
+- heat 分数融合：每个热榜命中 +5 分
+- 不改原 ddgs 逻辑（additive）
+
+synthesis → report 里 agent 可以直接引用："微博热搜 #3 '茅台 1499 回归' + 知乎热榜 #7 '茅台为什么跌' — 散户情绪发酵中"。
+
+### 回归测试
+
+- 新增 `tests/test_v2_12_hottrend.py` · **17 个用例**
+  - 6 个平台 parser 各一（mocked HTTP）
+  - 空响应 / 网络异常 handling
+  - 缓存 roundtrip + TTL 过期
+  - `get_hot_mentions` 命中匹配 / 平台失败降级 / 短关键词过滤
+  - 接口稳定性：SUPPORTED_PLATFORMS 固定 6 个
+- 全量 **115 passed**（原 98 + 新 17）
+- **零真实网络依赖**（所有 HTTP 都 mock 了）
+
+### 致谢
+
+本模块借鉴 [run-bigpig/jcp](https://github.com/run-bigpig/jcp) 的 `hottrend` 服务实现。`fetch_weibo` / `fetch_zhihu` 等函数的 API 端点和 User-Agent 策略直接参考其 Go 实现。
+
+### 升级
+
+`git pull origin main` · 无配置变更 · 首次触发 `17_sentiment` 时各平台并串 1 次，之后 5min 内秒回。
+
+---
+
 ## v2.11.0 — 2026-04-18 (评分校准 · 用户反馈驱动)
 
 > **论坛 linux.do/t/1981105 + 微信群多位用户反馈"分数偏低"**：@崔越"没超过 65 分"、@W.D"茅台 47 分"、@睡袍布太少"只测到天孚通信超 65"。本版做评分曲线校准。
