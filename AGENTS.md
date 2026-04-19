@@ -64,7 +64,44 @@ Do NOT proceed to report generation until you have:
 5. SET agent_reviewed: true in agent_analysis.json
 </HARD-GATE>
 
-Stage 1 跑完后，你必须：
+### ⛔ Step 3.0 · Playwright 兜底前置检查（v2.13.5 必走）
+
+Stage 1 跑完后 · 开始 role-play **之前**：
+
+```python
+import json, os
+from pathlib import Path
+
+# 1. 读网络 profile · 了解能抓哪些源
+net_path = Path(".cache/_global/network_profile.json")
+if net_path.exists():
+    net = json.loads(net_path.read_text(encoding="utf-8"))
+    print(f"网络: {net['recommendation']}")  # 比如"国内通 · 境外受限"
+
+# 2. 读自查 issues 找数据不足的维度
+issues_path = Path(f".cache/{ticker}/_review_issues.json")
+if issues_path.exists():
+    issues = json.loads(issues_path.read_text(encoding="utf-8"))
+    low_q = [
+        i["dim"] for i in issues.get("issues", [])
+        if i.get("category") == "data" and i.get("severity") in ("critical", "warning")
+    ]
+
+# 3. 如果 low_q 非空 · 主动强制跑一次 Playwright 兜底
+if low_q:
+    os.environ["UZI_PLAYWRIGHT_FORCE"] = "1"
+    from lib.playwright_fallback import autofill_via_playwright
+    summary = autofill_via_playwright(raw, ticker)
+    # summary.succeeded > 0 → 某些维度已被 Playwright 补齐 · 继续 role-play 时这些维度有真实数据了
+```
+
+**为什么这个 HARD-GATE**：v2.13.5 之前 agent 经常看到 `data.growth = "—"` 就在
+commentary 里写 "增速待补充"，但脚本其实可以用 Playwright 从百度/东财 F10/雪球
+抓到数据 · agent 没主动调就浪费了。
+
+Playwright 也抓不到的维度 · 再用 WebSearch / mx_api / 常识补（并标注"基于公开信息推断"）。
+
+### Step 3.1 你来做评委 role-play
 
 **3a. 读取 `.cache/{ticker}/panel.json`**
 

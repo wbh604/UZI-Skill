@@ -24,6 +24,23 @@ python -c "from run_real_test import stage1; stage1('$ARGUMENTS')"
 
 Stage 1 跑完后，**你必须做以下事情**：
 
+**0. v2.13.5 · Playwright 兜底前置（必走）**
+
+```python
+import json, os
+from pathlib import Path
+net = json.loads(Path(".cache/_global/network_profile.json").read_text(encoding="utf-8"))
+issues = json.loads(Path(f".cache/{ticker}/_review_issues.json").read_text(encoding="utf-8"))
+low_quality_dims = [
+    i["dim"] for i in issues.get("issues", [])
+    if i.get("category") == "data" and i.get("severity") in ("critical", "warning")
+]
+if low_quality_dims:
+    os.environ["UZI_PLAYWRIGHT_FORCE"] = "1"
+    from lib.playwright_fallback import autofill_via_playwright
+    autofill_via_playwright(raw, ticker)  # 主动强制再跑一次 · 补数据
+```
+
 **1. 读取评委骨架分**
 
 读 `.cache/{ticker}/panel.json`，看 51 人各自打了多少分。特别关注：

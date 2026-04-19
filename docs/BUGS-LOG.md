@@ -7,6 +7,40 @@
 
 ---
 
+## v2.13.5 (2026-04-19 · NetworkProfile 自适应 + agent HARD-GATE 主动触发 Playwright)
+
+### BUG · agent role-play 阶段不主动调 Playwright · 低质量数据未被兜底
+- **症状**：用户反馈"我使用下来，并没有遇到模型主动使用 Playwright 的问题"
+- **位置**：SKILL.md / AGENTS.md / commands/analyze-stock.md 的 agent 工作流指引
+- **根因**：
+  - stage1 末尾 `autofill_via_playwright` 自动跑一次 OK，但 data 有字段但全是 "—" 时 `_dim_needs_fallback` 判"不需要兜底" → 跳过
+  - agent 介入阶段只做 role-play，不碰数据补充
+  - SKILL.md 只在多处散句提及 "Chrome/Playwright MCP"，**没有** HARD-GATE 明确要求 agent 主动调 autofill
+- **影响**：
+  - 每次 agent role-play 出报告时，某些维度仍空
+  - 用户看到 "数据缺失" 的 commentary 模板话术
+  - Playwright 基础设施已全 · 但 agent 层**被动**不用
+- **修法**（三层）：
+  1. `lib/network_preflight.py` 升级 NetworkProfile（9 目标 3 组 + 代理检测 + 写 cache）· 提供 agent 决策输入
+  2. SKILL.md 加 `HARD-GATE-PLAYWRIGHT-AUTOFILL` · 明确 3 step 流程：读 net profile → 读 review_issues.json → 主动 FORCE 跑 autofill
+  3. `lib/playwright_fallback.DIM_NETWORK_REQUIREMENTS` 每维声明网络能力 · `_filter_dims_by_network` 自动过滤
+- **验证**：
+  - agent 按 SKILL.md 指引跑 · 看到 `_review_issues.json` warning 主动调 Playwright
+  - 测试构造 `NetworkProfile(domestic_ok=False)` → `_filter_dims_by_network` 全跳
+  - `NetworkProfile(search_ok=False)` → 7_industry / 18_trap 跳 · 其他维度保留
+- **回归测试**：`tests/test_v2_13_5_preflight_adaptive.py` 14 用例
+  - Layer 1：代理检测 / recommendation 变化 / cache 读写 / stale 重测（6 用例）
+  - Layer 3：domestic offline 全跳 / search offline 部分跳 / 全通保留（3 用例）
+  - Layer 2：SKILL.md / AGENTS.md / commands 文档检查（3 用例）
+  - 基本数据类：NetworkProfile 字段 / DIM_NETWORK_REQUIREMENTS 完整性（2 用例）
+- **若未来改 agent 工作流**：
+  - HARD-GATE-PLAYWRIGHT-AUTOFILL 不能删（SKILL.md line ~125 附近）· agent 读了就会主动用
+  - `.cache/_global/network_profile.json` schema 不能破（agent 依赖 domestic_ok/overseas_ok/search_ok 三字段）
+  - `DIM_NETWORK_REQUIREMENTS` 需覆盖 DIM_STRATEGIES 所有 key（有测试护栏 `test_dim_network_requirements_complete`）
+  - 新增维度要同步加网络声明
+
+---
+
 ## v2.13.3 (2026-04-19 · 51 评委规则全员历史立场还原)
 
 ### BUG · 19 位评委给中际旭创 100 分 · 立场与历史严重不符

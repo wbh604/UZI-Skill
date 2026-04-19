@@ -122,6 +122,77 @@ Payload 示例（agent 看到这个就知道该走 ETF 引导流程）:
 用户要求原话："不能只靠数据爬取，必须要 agent 介入高强度分析 + 多 agent 操作一定要加入进去"
 </HARD-GATE>
 
+### ⛔ HARD-GATE-PLAYWRIGHT-AUTOFILL · agent 必须主动触发 Playwright 兜底（v2.13.5）
+
+<HARD-GATE>
+用户反馈："我使用下来，并没有遇到模型主动使用 Playwright 的问题"。
+
+v2.13.5 起 **agent 介入阶段（stage1 → stage2 之间）必须主动触发 Playwright
+兜底**，不能等脚本 stage1 末尾自动跑就算完。原因：
+
+1. Stage1 末尾的 `autofill_via_playwright` 只跑一次 · 如果那时某维度 data 非空
+   但全是 "—"，`_dim_needs_fallback` 判不需要兜底，会被跳过
+2. Agent 介入后往往知道"哪些维度不够"（自查报告里报 warning/critical）· 应该
+   主动再跑一次 Playwright · 而不是在 `dim_commentary` 里写"数据缺失，参考同业"
+   这种废话
+
+**强制流程**（agent role-play 开始前必走）：
+
+**Step A · 读网络 profile**（新 v2.13.5 · `.cache/_global/network_profile.json`）
+```python
+import json
+from pathlib import Path
+prof_path = Path(".cache/_global/network_profile.json")
+if prof_path.exists():
+    net = json.loads(prof_path.read_text(encoding="utf-8"))
+    # net["domestic_ok"] / net["overseas_ok"] / net["search_ok"]
+    # net["recommendation"] 人读的一句话建议
+    print(f"网络: {net['recommendation']}")
+```
+
+**Step B · 读自查 issues 找低质量维度**
+```python
+issues_path = Path(f".cache/{ticker}/_review_issues.json")
+issues = json.loads(issues_path.read_text())
+low_quality_dims = [
+    i["dim"] for i in issues.get("issues", [])
+    if i.get("severity") in ("critical", "warning") and i.get("category") == "data"
+]
+# 例：["4_peers", "7_industry", "8_materials"]
+```
+
+**Step C · 主动触发 Playwright 兜底**（即使 stage1 跑过也再跑一次 · 用 FORCE=1）
+```python
+import os
+os.environ["UZI_PLAYWRIGHT_FORCE"] = "1"
+from lib.playwright_fallback import autofill_via_playwright
+summary = autofill_via_playwright(raw, ticker)
+# summary: {"attempted": X, "succeeded": Y, "failed": Z, "skipped_reasons": {...}}
+```
+
+**Step D · Playwright 失败的 dim · agent 用知识 + web_search 手工补**
+
+Playwright 也抓不到的维度（比如某些需要登录的页面）· **不能**在 commentary 里
+写空话 · 应该：
+1. 调 `WebSearch` 或 `web_search_trusted` 补原始资料
+2. 调 `mx_api`（若 MX_APIKEY 已设）
+3. 最后降级到 agent 的常识 + 明确标注"基于公开信息推断，非一手"
+
+**绝对禁止**：
+- 看到 `data.growth = "—"` 直接在 dim_commentary 里写"增速待补充"
+- 忽略 `_review_issues.json` 的 warning 直接出报告
+- Playwright summary.attempted=0 但未检查 `network_profile.json` 是否能用
+
+**绕过方式**（仅 lite / CI 环境）：
+- `UZI_DEPTH=lite` · lite 模式 `playwright_mode=off` · 此 HARD-GATE 自动跳过
+- `UZI_PLAYWRIGHT_ENABLE=0` · 显式禁用（但 deep 档不建议）
+
+v2.13.5 改动：
+- `lib/network_preflight.py` 升级 NetworkProfile（国内/境外/搜索 9 目标）· 写 cache
+- `lib/playwright_fallback.DIM_NETWORK_REQUIREMENTS` 每维声明所需网络能力
+- `autofill_via_playwright` 按 profile 自动跳过网络不可达的维度
+</HARD-GATE>
+
 ### 🎯 STYLE-WEIGHTING · 按股票风格动态加权（v2.7 · 自动）
 
 stage2 自动识别股票 style（白马 / 高成长 / 周期 / 小盘投机 / 分红防御 /

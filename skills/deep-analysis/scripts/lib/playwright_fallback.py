@@ -470,6 +470,59 @@ DIM_STRATEGIES: dict[str, Callable] = {
 }
 
 
+# v2.13.5 · 维度 → 所需网络能力（用于 NetworkProfile 自适应过滤）
+# domestic: 需要国内源通（东财/cninfo/雪球）
+# search: 需要搜索引擎通（百度/ddgs）
+# overseas: 需要境外源通（Yahoo/CoinGecko/Wikipedia EN）
+DIM_NETWORK_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "4_peers":       ("domestic",),              # 雪球 /S/{sym}
+    "8_materials":   ("domestic",),              # 东财 F10
+    "15_events":     ("domestic",),              # cninfo 公告
+    "17_sentiment":  ("domestic",),              # 雪球 /POST
+    "3_macro":       ("domestic",),              # stats.gov.cn
+    "7_industry":    ("domestic", "search"),     # 百度搜索行业景气度
+    "14_moat":       ("domestic",),              # 百度百科
+    "13_policy":     ("domestic",),              # csrc.gov.cn
+    "18_trap":       ("domestic", "search"),     # 小红书搜索页（需搜索）
+    "19_contests":   ("domestic",),              # 雪球 /cube/rank/list
+}
+
+
+def _filter_dims_by_network(dims: frozenset) -> tuple[frozenset, list[str]]:
+    """v2.13.5 · 按当前 NetworkProfile 过滤白名单 · 返 (有效维度, 被跳维度清单).
+
+    例：国内网络不通 → 所有 domestic 维度全跳
+    例：搜索不通 → 7_industry / 18_trap 跳
+    """
+    try:
+        from lib.network_preflight import get_network_profile
+        net = get_network_profile()
+    except Exception:
+        return dims, []  # 拿不到 profile · 不过滤
+
+    effective = set()
+    skipped: list[str] = []
+    for d in dims:
+        reqs = DIM_NETWORK_REQUIREMENTS.get(d, ())
+        satisfied = True
+        why = []
+        for req in reqs:
+            if req == "domestic" and not net.domestic_ok:
+                satisfied = False
+                why.append("domestic 不通")
+            elif req == "search" and not net.search_ok:
+                satisfied = False
+                why.append("search 不通")
+            elif req == "overseas" and not net.overseas_ok:
+                satisfied = False
+                why.append("overseas 不通")
+        if satisfied:
+            effective.add(d)
+        else:
+            skipped.append(f"{d}({','.join(why)})")
+    return frozenset(effective), skipped
+
+
 # ─── 入口 · post-fetch 兜底 ──────────────────────────────────────
 
 def _is_empty_value(v) -> bool:
@@ -577,12 +630,21 @@ def autofill_via_playwright(raw: dict, ticker: str) -> dict:
     dims = raw.get("dimensions", {})
     force = os.environ.get("UZI_PLAYWRIGHT_FORCE") == "1"
 
+    # v2.13.5 · NetworkProfile 自适应 · 无网络能力的维度直接跳过不尝试
+    effective_dims, network_skipped = _filter_dims_by_network(profile.playwright_dims)
+    if network_skipped:
+        print(f"   🌐 网络过滤 · 跳过 {len(network_skipped)} 维: {', '.join(network_skipped)}")
+        for s in network_skipped:
+            dim_name = s.split("(")[0]
+            summary["skipped"] += 1
+            summary["skip_reasons"][dim_name] = f"网络能力不足 · {s}"
+
     print(f"   🎭 profile={profile.depth} · playwright_dims={len(profile.playwright_dims)}"
-          f" · FORCE={force}")
+          f" · effective={len(effective_dims)} · FORCE={force}")
 
     from lib.junk_filter import is_junk_autofill_text
 
-    for dim_key in sorted(profile.playwright_dims):
+    for dim_key in sorted(effective_dims):
         dim = dims.get(dim_key, {})
 
         if not force:

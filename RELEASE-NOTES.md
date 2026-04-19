@@ -1,5 +1,91 @@
 # Release Notes
 
+## v2.13.5 — 2026-04-19 (NetworkProfile 自适应 + agent HARD-GATE 主动触发 Playwright)
+
+> **用户反馈**："我使用下来，并没有遇到模型主动使用 Playwright 的问题" · 诊断发现 agent role-play 阶段根本没教过要调 Playwright · 脚本自动跑 OK 但 agent 不补漏
+
+### 三层解决
+
+**Layer 1 · `NetworkProfile` 升级**（`lib/network_preflight.py`）
+
+从 v2.10.2 的 "5 个国内 TCP connect" 升级到：
+- **9 个目标 3 组**：国内（push2/cninfo/xueqiu）+ 境外（yahoo/coingecko/baike）+ 搜索（ddgs/baidu/github）
+- **代理检测**：扫 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 大小写 6 个 env
+- **结构化输出**：`NetworkProfile(domestic_ok, overseas_ok, search_ok, has_proxy, recommendation, severity)`
+- **缓存到 `.cache/_global/network_profile.json`** · 5min TTL · agent 介入时直接读
+
+诊断输出：
+```
+🌐 网络预检 (9/9 通 · 均延迟 4ms · proxy=no)
+  [国内 3/3] ✓ push2.eastmoney.com · cninfo · 雪球
+  [境外 3/3] ✓ query1.finance.yahoo.com · api.coingecko.com · baike.baidu.com
+  [搜索 3/3] ✓ duckduckgo.com · www.baidu.com · api.github.com
+  ✓ 全网通畅 · Playwright 可抓境内+境外所有源
+```
+
+**Layer 2 · Agent HARD-GATE-PLAYWRIGHT-AUTOFILL**（`SKILL.md` / `AGENTS.md` / `commands/analyze-stock.md`）
+
+明确要求 agent 在 stage1 → stage2 **之间**：
+
+```python
+# 1. 读网络 profile
+net = json.loads(Path(".cache/_global/network_profile.json").read_text())
+print(net["recommendation"])  # 人读的建议
+
+# 2. 读自查 issues 找低质量维度
+issues = json.loads(Path(f".cache/{ticker}/_review_issues.json").read_text())
+low_q = [i["dim"] for i in issues["issues"]
+         if i.get("category")=="data" and i.get("severity") in ("critical","warning")]
+
+# 3. 主动强制跑 Playwright 兜底
+if low_q:
+    os.environ["UZI_PLAYWRIGHT_FORCE"] = "1"
+    from lib.playwright_fallback import autofill_via_playwright
+    autofill_via_playwright(raw, ticker)
+```
+
+**绝对禁止**：看到 `data.growth = "—"` 直接在 commentary 里写"增速待补充"——应该先让 Playwright 抓一次。
+
+**Layer 3 · `DIM_STRATEGIES` 按 NetworkProfile 自适应**（`lib/playwright_fallback.py`）
+
+每个维度声明所需网络能力：
+```python
+DIM_NETWORK_REQUIREMENTS = {
+    "4_peers":       ("domestic",),              # 雪球
+    "7_industry":    ("domestic", "search"),     # 百度搜索
+    "18_trap":       ("domestic", "search"),     # 小红书搜索
+    "14_moat":       ("domestic",),              # 百度百科
+    # ... 10 个维度都声明
+}
+```
+
+运行时按 profile 过滤：
+- `search_ok=False` → 7_industry / 18_trap 直接跳（跳前打印原因）
+- `domestic_ok=False` → 10 维全跳
+- 日志明确："🌐 网络过滤 · 跳过 2 维: 7_industry(search 不通), 18_trap(search 不通)"
+
+### 回归测试
+
+- 新增 `tests/test_v2_13_5_preflight_adaptive.py` · **14 个用例**
+- NetworkProfile：proxy env / recommendation 变化 / cache 读写 / stale 重测
+- DIM_STRATEGIES 自适应：domestic 不通全跳 / search 不通部分跳 / 全通全保留
+- HARD-GATE 文档：SKILL.md / AGENTS.md / commands 都含 `autofill_via_playwright` 字面量
+- 全量 **195 passed**（v2.13.4 181 + 新 14）
+
+### 用户影响
+
+从此 agent 遇到空数据会**主动**开浏览器补：
+- v2.13.2 autofill_via_playwright 只在 stage1 末尾跑一次 · 漏补的维度 agent 没补
+- v2.13.5 agent role-play 前 **强制再跑一次 FORCE 模式** · 覆盖 stage1 漏的
+
+配合 v2.13.2 `UZI_PLAYWRIGHT_FORCE=1` + v2.13.1 全 10 维覆盖 + v2.13.0 三档分级 · 形成完整 Playwright 层。
+
+### 升级
+
+`git pull origin main` · 下次 agent 读 SKILL.md 自动按新 HARD-GATE 执行
+
+---
+
 ## v2.13.4 — 2026-04-19 (新增 10 个经 curl 验证的无 Key 公开数据源)
 
 > **用户提供 Grok 清单 20+ 个 "全网最全" 无需 Key 的行情接口** · 批量 curl 真实验证 · 过滤无效项 · 9 有效加密源 + 1 Yahoo Chart v8 + 1 腾讯港股 quote 注册入库

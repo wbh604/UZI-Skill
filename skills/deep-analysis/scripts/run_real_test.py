@@ -1546,10 +1546,11 @@ def stage1(ticker: str) -> dict:
         try:
             from lib.network_preflight import run_preflight
             pre = run_preflight(verbose=True, timeout=3.0)
-            # 3 个以上不通 → 强制 lite
-            if pre["critical_failures"] >= 3 and os.environ.get("UZI_LITE") != "0":
+            # v2.13.5 · NetworkProfile 返 dataclass · 用 severity 判定
+            # critical/degraded → 强制 lite（除非 UZI_LITE=0 显式覆盖）
+            if pre.severity in ("critical", "degraded") and os.environ.get("UZI_LITE") != "0":
                 os.environ["UZI_LITE"] = "1"
-                print(f"   ⚡ 网络严重受限，自动切 lite 模式防止挂太久\n")
+                print(f"   ⚡ 网络受限（{pre.severity}），自动切 lite 模式防止挂太久\n")
         except Exception as _e:
             print(f"  ⚠️ preflight failed (非致命): {_e}")
 
