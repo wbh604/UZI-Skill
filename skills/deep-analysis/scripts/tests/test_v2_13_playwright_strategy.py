@@ -293,7 +293,7 @@ def test_autofill_skips_dim_with_existing_data():
     # clear=True 避免其他 deep 白名单 dim 走真实网络
     with patch.object(pf, "ensure_playwright_installed", return_value=True), \
          patch.dict(pf.DIM_STRATEGIES, {"4_peers": tracking_strategy}, clear=True):
-        # peer_table 已有 5 条真实数据 · 不需要兜底
+        # 4_peers 有 4 个非空字段（quality 100%）· 不需要兜底
         raw = {
             "dimensions": {
                 "4_peers": {
@@ -310,6 +310,133 @@ def test_autofill_skips_dim_with_existing_data():
         pf.autofill_via_playwright(raw, "300308.SZ")
     # 4_peers 有数据 · 不触发 strategy
     assert called == [], f"已有数据的 dim 不应被重抓，但 strategy 被调用 {len(called)} 次"
+    _reset_env()
+
+
+# ─── v2.13.2 · 数据质量感知 + FORCE flag ──────────────────────────
+
+def test_dim_quality_score_detects_mostly_empty():
+    """12 个 key 但 9 个是 "—" → quality 25% → 触发兜底."""
+    _, pf = _reload_all()
+    mostly_empty = {
+        "industry": "通信设备",      # 非空
+        "lifecycle": "景气上行",     # 非空
+        "growth": "—",
+        "tam": "—",
+        "penetration": "—",
+        "note": "",
+        "extra1": None,
+        "extra2": "",
+        "extra3": "N/A",
+        "extra4": [],
+        "extra5": {},
+        "cninfo_metrics": {"x": 1},  # 非空
+    }
+    score = pf._dim_quality_score(mostly_empty)
+    # 3/12 非空（industry, lifecycle, cninfo_metrics） · 质量 25%
+    assert score < 0.5, f"expected quality < 50%, got {score:.0%}"
+    needs, _ = pf._dim_needs_fallback({"data": mostly_empty, "fallback": False})
+    assert needs is True, "quality 25% 应触发 Playwright 兜底"
+
+
+def test_dim_quality_score_skips_ignoring_underscore_keys():
+    """_前缀诊断字段不计入 quality 分母."""
+    _, pf = _reload_all()
+    data = {
+        "name": "中际旭创",            # 公开 · 非空 · 1/2 = 50%
+        "growth": "—",                # 公开 · 空
+        "_autofill": {"source": "mx"}, # 诊断 · 不计
+        "_debug": "...",              # 诊断 · 不计
+    }
+    score = pf._dim_quality_score(data)
+    assert score == 0.5, f"expected 0.5 (1/2 · 忽略 _ 前缀), got {score}"
+
+
+def test_autofill_triggers_on_low_quality_data():
+    """data 非空但全是 "—" 的维度也应触发 Playwright 兜底（v2.13.2 核心改进）."""
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "deep"
+    _, pf = _reload_all()
+    called = []
+
+    def tracking_strategy(ticker, raw):
+        called.append(ticker)
+        return {"growth_from_playwright": "25%/年"}
+
+    with patch.object(pf, "ensure_playwright_installed", return_value=True), \
+         patch.dict(pf.DIM_STRATEGIES, {"7_industry": tracking_strategy}, clear=True):
+        raw = {
+            "dimensions": {
+                "7_industry": {
+                    "data": {
+                        "industry": "通信设备",
+                        "growth": "—",
+                        "tam": "—",
+                        "penetration": "—",
+                        "lifecycle": "—",
+                    },
+                    "fallback": False,  # 主链标称成功，但 data 全 "—"
+                }
+            }
+        }
+        summary = pf.autofill_via_playwright(raw, "300308.SZ")
+
+    assert len(called) == 1, "低质量数据应触发 Playwright（v2.13.2）"
+    assert summary["succeeded"] == 1
+    # 写入确认
+    assert "growth_from_playwright" in raw["dimensions"]["7_industry"]["data"]
+    _reset_env()
+
+
+def test_force_flag_ignores_quality_check():
+    """UZI_PLAYWRIGHT_FORCE=1 时即使数据质量高也触发."""
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "deep"
+    os.environ["UZI_PLAYWRIGHT_FORCE"] = "1"
+    _, pf = _reload_all()
+    called = []
+
+    def tracking_strategy(ticker, raw):
+        called.append(ticker)
+        return None  # 模拟抓失败
+
+    with patch.object(pf, "ensure_playwright_installed", return_value=True), \
+         patch.dict(pf.DIM_STRATEGIES, {"4_peers": tracking_strategy}, clear=True):
+        raw = {
+            "dimensions": {
+                "4_peers": {
+                    "data": {
+                        "peer_table": [{"a": 1}, {"b": 2}, {"c": 3}, {"d": 4}],
+                        "peer_comparison": [{"e": 5}],
+                        "rank": "1/50",
+                        "industry": "光模块",
+                    },
+                    "fallback": False,
+                }
+            }
+        }
+        pf.autofill_via_playwright(raw, "300308.SZ")
+    # FORCE=1 · 即使数据已足也调
+    assert len(called) == 1, "FORCE=1 应忽略 quality check"
+    _reset_env()
+
+
+def test_autofill_summary_has_disabled_reason_when_off():
+    """lite 档 / medium 未 opt-in → summary.disabled_reason 明确."""
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "medium"  # opt-in 未设
+    _, pf = _reload_all()
+    summary = pf.autofill_via_playwright({"dimensions": {}}, "300308.SZ")
+    assert summary["enabled"] is False
+    assert "opt-in" in summary["disabled_reason"] or "UZI_PLAYWRIGHT_ENABLE" in summary["disabled_reason"]
+    _reset_env()
+
+    _reset_env()
+    os.environ["UZI_DEPTH"] = "lite"
+    _, pf = _reload_all()
+    summary = pf.autofill_via_playwright({"dimensions": {}}, "300308.SZ")
+    assert summary["enabled"] is False
+    assert "off" in summary["disabled_reason"] or "lite" in summary["disabled_reason"]
     _reset_env()
 
 

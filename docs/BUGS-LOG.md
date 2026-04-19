@@ -7,6 +7,44 @@
 
 ---
 
+## v2.13.2 (2026-04-19 · Playwright 触发逻辑升级 · 数据质量感知 + FORCE flag)
+
+### BUG · 维度有 data 但值都是 "—"/空时 Playwright 兜底未触发
+- **症状**：用户反馈"有很多网站爬不到内容，也没拉起 Playwright"。中际旭创 cache 里 `7_industry.data` 有 12 个 key 但 `growth`/`tam`/`penetration` 都是 `"—"`，Playwright 却判定"已有数据"直接跳过
+- **位置**：`lib/playwright_fallback.py::_dim_needs_fallback`
+- **根因**：原版只看 `len(data)`：
+  ```python
+  if not data or not isinstance(data, dict): return True
+  if dim.get("fallback") and len(data) < 4: return True
+  return False
+  ```
+  数据 12 keys 但全是垃圾也判"不需要兜底" · 用户期望落空
+- **修法**：
+  1. 新加 `_dim_quality_score(data)` 计算有效值占比（排除 `_` 前缀诊断字段）
+  2. `QUALITY_THRESHOLD = 0.5` · 低于 50% 触发兜底
+  3. `dim.fallback=True` 总是触发（不再看 len）
+  4. 返 tuple `(needs, reason)` 让日志可看
+- **附加**：
+  - 加 `UZI_PLAYWRIGHT_FORCE=1` 环境变量 · 用户强制 kill switch · 忽略 quality 判定
+  - `autofill_via_playwright` 加清晰日志 · 每个维度 skip/run 原因可见 · 禁用时明确 `disabled_reason`
+- **验证**：
+  - `_dim_quality_score({"a":"—","b":"","c":None,"d":[],"e":"真实"})` → 20%
+  - 12 keys 含 3 有效 → 触发 ✅
+  - FORCE=1 · 质量 100% 的 dim 也触发
+- **回归测试**：`test_v2_13_playwright_strategy.py` 新增 5 用例
+  - `test_dim_quality_score_detects_mostly_empty`
+  - `test_dim_quality_score_skips_ignoring_underscore_keys`
+  - `test_autofill_triggers_on_low_quality_data`
+  - `test_force_flag_ignores_quality_check`
+  - `test_autofill_summary_has_disabled_reason_when_off`
+- **若未来改 Playwright 触发**：
+  - `_dim_needs_fallback` 返 tuple `(needs, reason)` 契约不能破（调用方日志依赖 reason）
+  - `QUALITY_THRESHOLD` 如需调整必须跑 `test_autofill_triggers_on_low_quality_data` 确保低质量用例仍触发
+  - `_` 前缀字段不计 quality 这个语义不能改（避免 `_autofill`/`_debug` 被误当有效数据）
+  - `UZI_PLAYWRIGHT_FORCE` 是用户 kill switch · 不能移除
+
+---
+
 ## v2.13.1 (2026-04-18 · Playwright 全 10 维覆盖 · 策略契约修订)
 
 ### 改进 · 扩展 DIM_STRATEGIES 到全 10 维（策略调整，非 bug 修复）

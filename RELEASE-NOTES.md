@@ -1,5 +1,76 @@
 # Release Notes
 
+## v2.13.2 — 2026-04-19 (Playwright 触发逻辑升级 · 数据质量感知 + FORCE flag)
+
+> **用户反馈**："有很多网站爬不到内容，也没有拉起 Playwright" · 诊断发现三个根因：(1) v2.13.1 之前 cache 没 Playwright 字段 (2) `_dim_needs_fallback` 只看 `len(data)` 不看值质量 (3) skip 时无日志告诉用户为什么
+
+### 根因诊断（中际旭创 cache 实测）
+
+| 维度 | data 字段数 | 其中有效 | 质量 | v2.13.1 判定 | v2.13.2 判定 |
+|---|---|---|---|---|---|
+| 7_industry | 12 | 3 (`industry`/`lifecycle`/`cninfo_metrics`) | 25% | "不需要兜底" ❌ | "需要兜底" ✅ |
+| 4_peers (self-only) | 7 | 5 但 fallback=True | — | 不触发 ❌ | 触发 ✅ |
+| 8_materials | 8 | 全是 "—"/空 | ~0% | "不需要兜底" ❌ | "需要兜底" ✅ |
+
+### v2.13.2 核心改进
+
+**1. `_dim_needs_fallback` 数据质量感知**
+
+新加 `_dim_quality_score(data)` 计算有效字段占比：
+- 排除 `_` 前缀的诊断字段（如 `_autofill` / `_debug`）
+- 统计非空值：非 `None` / 非 `"—"/"N/A"/""` / 非空 list/dict
+- 阈值 `QUALITY_THRESHOLD = 0.5` · 低于 50% 触发兜底
+
+触发条件扩展：
+- data 为空 → 触发（原版）
+- **`dim.fallback=True` → 总是触发**（新增 · 不再看 `len(data)<4`）
+- **quality < 50% → 触发**（核心改进）
+
+**2. `UZI_PLAYWRIGHT_FORCE=1` · kill switch**
+
+用户发现自动判定太保守时可强制重抓：
+```bash
+UZI_PLAYWRIGHT_FORCE=1 python3 run.py 300308.SZ --depth deep --no-resume
+```
+忽略 `_dim_needs_fallback` · 对所有 `profile.playwright_dims` 维度强制跑。
+
+**3. 清晰的 skip/run 日志**
+
+```
+🎭 profile=deep · playwright_dims=10 · FORCE=False
+⏭  4_peers         skip · 有效字段占比 71% 已达标
+✓  7_industry      via playwright · 字段: baidu_search_titles, baidu_search_descs
+✗  18_trap         页面抓取失败或解析无数据
+📊 Playwright 兜底 · 尝试 5 · 成功 3 · 失败 1 · 跳过 1（数据已足）
+```
+
+禁用时也明确说明：
+```
+ℹ️  Playwright skip · profile=medium · opt-in 未启用 · export UZI_PLAYWRIGHT_ENABLE=1 启用后重跑
+```
+
+### 回归测试
+
+- 新增 5 个用例：
+  - `test_dim_quality_score_detects_mostly_empty` · 12 keys 中 9 个 "—" → quality 25% → 触发
+  - `test_dim_quality_score_skips_ignoring_underscore_keys` · `_` 前缀不计 quality
+  - `test_autofill_triggers_on_low_quality_data` · 5 个全 "—" 的 key 应触发 Playwright
+  - `test_force_flag_ignores_quality_check` · FORCE=1 忽略 quality
+  - `test_autofill_summary_has_disabled_reason_when_off` · lite / medium 未 opt-in 都有明确 `disabled_reason`
+- 全量 **158 passed**（v2.13.1 153 + 新 5）
+
+### 升级
+
+`git pull origin main` · 老 cache 不会自动重跑 · `--no-resume` 能立即看到 Playwright 触发。
+
+**强制兜底（解决"爬不到也没拉起 Playwright"）**：
+```bash
+export UZI_PLAYWRIGHT_FORCE=1
+python3 run.py 300308.SZ --depth deep --no-browser --no-resume
+```
+
+---
+
 ## v2.13.1 — 2026-04-18 (Playwright 全 10 维覆盖 · 开源研究场景扩展)
 
 > **用户明确本项目是开源研究场景，反爬/合规不受限制**。v2.13.0 Codex review 为保守起见排除了 5 维，本版全部加回。

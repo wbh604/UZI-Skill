@@ -472,74 +472,163 @@ DIM_STRATEGIES: dict[str, Callable] = {
 
 # ─── 入口 · post-fetch 兜底 ──────────────────────────────────────
 
-def _dim_needs_fallback(dim: dict) -> bool:
-    """判断维度是否需要 Playwright 兜底（data 为空 / 仅 fallback 标志）."""
-    if not isinstance(dim, dict):
+def _is_empty_value(v) -> bool:
+    """判断一个值是否"实质为空"（— / None / 空串 / 空容器）."""
+    if v is None:
         return True
-    data = dim.get("data")
-    if not data or not isinstance(data, dict):
-        return True
-    # 有 fallback=True 且 data 内容稀少也算需要兜底
-    if dim.get("fallback") and len(data) < 4:
-        return True
+    if isinstance(v, str):
+        s = v.strip()
+        return s in ("", "—", "-", "--", "N/A", "n/a", "None", "null", "TBD")
+    if isinstance(v, (list, dict, tuple, set)):
+        return len(v) == 0
     return False
 
 
+def _dim_quality_score(data: dict) -> float:
+    """数据质量分数 = 有效值占比（非 "—"/None/空）· 0.0-1.0.
+
+    只统计"公开字段"（不以 `_` 开头的 key · 排除诊断字段）.
+    """
+    if not isinstance(data, dict) or not data:
+        return 0.0
+    public_keys = [k for k in data.keys() if not str(k).startswith("_")]
+    if not public_keys:
+        return 0.0
+    valid = sum(1 for k in public_keys if not _is_empty_value(data[k]))
+    return valid / len(public_keys)
+
+
+# v2.13.2 · 数据质量阈值 · 低于此值 → 触发 Playwright 兜底
+# 中际旭创实测：7_industry 有 12 keys 但 growth/tam/penetration 都 "—" → quality ~0.25
+QUALITY_THRESHOLD = 0.5
+
+
+def _dim_needs_fallback(dim: dict) -> tuple[bool, str]:
+    """判断维度是否需要 Playwright 兜底 · 返 (needs, reason).
+
+    v2.13.2 升级：除了"data 空"判断外，增加"数据质量"判断——
+    data 即使非空，但有效字段 < 50% 也触发兜底（解决 "growth=—,tam=—,penetration=—"
+    12 keys 但全垃圾"的情况）.
+    """
+    if not isinstance(dim, dict):
+        return True, "dim 非 dict"
+    data = dim.get("data")
+    if not data or not isinstance(data, dict):
+        return True, "data 为空或非 dict"
+    # fallback 标记 · 总是需要兜底
+    if dim.get("fallback"):
+        return True, "主链标 fallback=True"
+    # 数据质量检查 · 有效值 < 50%
+    q = _dim_quality_score(data)
+    if q < QUALITY_THRESHOLD:
+        return True, f"有效字段占比 {q:.0%} < {QUALITY_THRESHOLD:.0%}"
+    return False, f"有效字段占比 {q:.0%} 已达标"
+
+
 def autofill_via_playwright(raw: dict, ticker: str) -> dict:
-    """post-fetch 兜底 · 对 profile.playwright_dims 里仍为空的维度尝试浏览器抓取.
+    """post-fetch 兜底 · 对 profile.playwright_dims 里数据不足的维度尝试浏览器抓取.
 
     在 run_real_test.py::_autofill_qualitative_via_mx 之后调用.
 
-    Returns:
-        {"enabled": bool, "attempted": int, "succeeded": int, "skipped_reasons": [...]}
-    """
-    summary = {"enabled": False, "attempted": 0, "succeeded": 0, "failed": 0,
-               "skipped_reasons": []}
+    环境变量：
+    - `UZI_PLAYWRIGHT_FORCE=1` · 忽略 `_dim_needs_fallback`，对所有白名单维度强制跑
+      （用户发现自动判定太保守时的 kill switch）
 
-    if not is_playwright_enabled():
-        summary["skipped_reasons"].append("profile.playwright_mode 未启用或 opt-in 未设置")
+    Returns:
+        {"enabled": bool, "attempted": int, "succeeded": int, "failed": 0,
+         "skipped": int, "skip_reasons": {dim: reason}, "disabled_reason": str}
+    """
+    summary = {
+        "enabled": False, "attempted": 0, "succeeded": 0, "failed": 0,
+        "skipped": 0, "skip_reasons": {},
+        "disabled_reason": "",
+    }
+
+    # ─── 1. 启用检查 · 失败时明确说原因 ───
+    try:
+        from lib.analysis_profile import get_profile
+        profile = get_profile()
+    except Exception as e:
+        summary["disabled_reason"] = f"profile 加载失败: {e}"
+        print(f"   ⚠️  Playwright skip · {summary['disabled_reason']}")
         return summary
 
-    from lib.analysis_profile import get_profile
-    profile = get_profile()
-    # 按 mode 决定是否自动装
-    auto_install = (profile.playwright_mode == "default")
+    mode = profile.playwright_mode
+    if mode == "off":
+        summary["disabled_reason"] = f"profile={profile.depth} · playwright_mode=off（lite 档不用浏览器）"
+        print(f"   ℹ️  Playwright skip · {summary['disabled_reason']}")
+        return summary
+
+    if mode == "opt-in" and os.environ.get("UZI_PLAYWRIGHT_ENABLE") != "1":
+        summary["disabled_reason"] = (
+            f"profile={profile.depth} · opt-in 未启用 · "
+            "export UZI_PLAYWRIGHT_ENABLE=1 启用后重跑"
+        )
+        print(f"   ℹ️  Playwright skip · {summary['disabled_reason']}")
+        return summary
+
+    # ─── 2. 安装检查 · 失败时 graceful degrade ───
+    auto_install = (mode == "default")
     if not ensure_playwright_installed(auto=auto_install):
-        summary["skipped_reasons"].append("Playwright 未装 · graceful degrade")
+        summary["disabled_reason"] = "Playwright 包或 Chromium 未安装 · 已降级跳过"
         return summary
 
     summary["enabled"] = True
     dims = raw.get("dimensions", {})
+    force = os.environ.get("UZI_PLAYWRIGHT_FORCE") == "1"
+
+    print(f"   🎭 profile={profile.depth} · playwright_dims={len(profile.playwright_dims)}"
+          f" · FORCE={force}")
+
     from lib.junk_filter import is_junk_autofill_text
 
     for dim_key in sorted(profile.playwright_dims):
         dim = dims.get(dim_key, {})
-        if not _dim_needs_fallback(dim):
-            continue  # 已有真实数据 · 跳过
+
+        if not force:
+            needs, reason = _dim_needs_fallback(dim)
+            if not needs:
+                summary["skipped"] += 1
+                summary["skip_reasons"][dim_key] = reason
+                print(f"   ⏭  {dim_key:14s} skip · {reason}")
+                continue
+
         strategy = DIM_STRATEGIES.get(dim_key)
         if not strategy:
+            summary["skipped"] += 1
+            summary["skip_reasons"][dim_key] = "DIM_STRATEGIES 未定义"
             continue
+
         summary["attempted"] += 1
         try:
             result = strategy(ticker, raw)
         except Exception as e:
             summary["failed"] += 1
-            print(f"   ⚠️  {dim_key} Playwright parser 异常: {type(e).__name__}: {str(e)[:80]}")
+            print(f"   ❌ {dim_key:14s} parser 异常: {type(e).__name__}: {str(e)[:80]}")
             continue
+
         if not result:
             summary["failed"] += 1
+            print(f"   ✗ {dim_key:14s} 页面抓取失败或解析无数据")
             continue
+
         # 过滤垃圾数据
-        result_str = str(result)
-        if is_junk_autofill_text(result_str):
+        if is_junk_autofill_text(str(result)):
             summary["failed"] += 1
+            print(f"   ✗ {dim_key:14s} 抓到疑似垃圾数据 · 已过滤")
             continue
+
         # 写入
         data = dim.setdefault("data", {})
         data.update(result)
         dim["source"] = (dim.get("source", "") + " + playwright_fallback").lstrip(" +")
+        # 确保 dim 进入 dimensions（如果之前没有）
+        dims.setdefault(dim_key, dim)
         summary["succeeded"] += 1
-        print(f"   ✓ {dim_key:14s} via playwright ({list(result.keys())[0]})")
+        print(f"   ✓ {dim_key:14s} via playwright · 字段: {', '.join(list(result.keys())[:3])}")
 
-    print(f"   Playwright 兜底 · 尝试 {summary['attempted']} · 成功 {summary['succeeded']} · 失败 {summary['failed']}")
+    print(
+        f"   📊 Playwright 兜底 · 尝试 {summary['attempted']} · 成功 {summary['succeeded']}"
+        f" · 失败 {summary['failed']} · 跳过 {summary['skipped']}（数据已足）"
+    )
     return summary
