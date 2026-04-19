@@ -165,6 +165,26 @@ def main(ticker: str) -> dict:
     disclosures = _cninfo_disclosures(ti.code)
     news = _try_news(ti.code)
 
+    # v2.13.7 · 多源新闻聚合（金十/东财快讯/东财公告/同花顺）· 直连 HTTP · ddgs 盲区
+    try:
+        from lib.news_providers import get_news_multi_source
+        multi = get_news_multi_source(stock_code=ti.code, stock_name=company_name, limit_per_source=10)
+        for src, items in (multi.get("sources") or {}).items():
+            for it in items:
+                if not isinstance(it, dict) or it.get("error"):
+                    continue
+                title = it.get("title", "")[:80]
+                if not title or _is_noise_news(title):
+                    continue
+                news.append({
+                    "date": (it.get("publish_time") or "")[:16] or "—",
+                    "title": title,
+                    "type": f"news_providers:{src}",
+                    "source": it.get("url", ""),
+                })
+    except Exception:
+        pass
+
     # If filtered news is too sparse, supplement with web search
     if len(news) < 3:
         ws_events = _web_search_events(company_name)
@@ -218,7 +238,7 @@ def main(ticker: str) -> dict:
             "catalyst": catalysts[:5],
             "warnings": warning_items if warning_items else [],
         },
-        "source": "cninfo:stock_zh_a_disclosure_report + akshare:stock_news_em + web_search (filtered)",
+        "source": "cninfo:stock_zh_a_disclosure_report + akshare:stock_news_em + news_providers(jin10/em/ths) + web_search",
         "fallback": False,
     }
 

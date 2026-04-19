@@ -7,6 +7,52 @@
 
 ---
 
+## v2.13.7 (2026-04-19 · wire new sources · registry 登记但 fetcher 没用的 16 源接入)
+
+### BUG · v2.13.4 / v2.13.6 新增源只登记未接入 · 数据流通失效
+- **症状**：v2.13.6 加了 `jin10_flash` / `em_kuaixun` / `em_stock_ann` / `ths_news_today` 到 registry，但 `fetch_events.py` / `fetch_sentiment.py` 没调它们，数据源对实际报告 zero 影响
+- **位置**：
+  - `skills/deep-analysis/scripts/fetch_events.py` (15_events · A 股)
+  - `skills/deep-analysis/scripts/fetch_sentiment.py` (17_sentiment)
+  - `skills/deep-analysis/scripts/fetch_policy.py` (13_policy)
+  - `skills/deep-analysis/scripts/lib/data_sources.py::_kline_us_chain` / `_kline_hk_chain`
+- **根因**：
+  - `data_source_registry.py` 只是声明清单（tier/markets/dims/health 元数据）· 真正的调用必须在 fetcher 里显式写代码
+  - 之前添加 registry entry 时没同步改 fetcher，导致"注册但未使用"
+  - 对外看：`SOURCES 已 70` 但用户报告里新闻还是 3-5 条（来自老 cninfo + ak.stock_news_em）
+- **影响**：
+  - 15_events 数据密度 3-5 条 · 应有 10-30 条
+  - 17_sentiment heat 分数偏低 · 没利用金十/东财快讯的实时信号
+  - 13_policy 期货/商品类 industry 没有权威协会源信号
+  - 美股/港股 K 线在 yfinance 挂掉时（2026 年常见 cookie 失败）无 HTTP 兜底
+- **修法**：
+  1. 新建 `lib/news_providers.py`（160 行）· 4 新闻源统一聚合 · 10 min cache
+  2. `fetch_events.py::main()` A 股路径调 `get_news_multi_source` 合并结果
+  3. `fetch_sentiment.py` 调 `get_news_multi_source` 做情绪增强 + heat bonus
+  4. `fetch_policy.py` 加 `_fetch_cfachina_titles` · 期货相关 industry 才触发
+  5. `data_sources.py::_yahoo_v8_chart()` · 429 自动 retry · US/HK kline chain 都接入
+- **验证**：
+  - `python3 lib/news_providers.py "" ""` → sources_ok: 4/4, total_hits: 31 ✓
+  - `_yahoo_v8_chart("AAPL", "1mo")` → 22 rows ✓
+  - `_yahoo_v8_chart("0700.HK", "1mo")` → 21 rows ✓
+  - pytest 全量 217 passed（baseline 205 + 12 新）
+- **回归测试**：`tests/test_v2_13_7_wire_new_sources.py`
+  - `news_providers` 模块 API 存在性 + dataclass
+  - `fetch_jin10` / `fetch_em_kuaixun` 正则解析 · 特别 em_kuaixun 无尾 `;` 格式
+  - `fetch_events` / `fetch_sentiment` 接入 news_providers 调用路径
+  - `_yahoo_v8_chart` 解析 + 429 retry
+  - `_kline_us_chain` yf/ak 全败时兜底到 v8
+  - `fetch_policy` 期货 industry 调 cfachina · 非期货跳
+- **未来改该区域注意事项**：
+  - **每次往 `data_source_registry.SOURCES` 加新源，都必须同时改对应的 fetcher 去实际调用这个源**。registry 是静态声明，不是活调度
+  - `news_providers.py` 是"ddgs 盲区"补充 · 不是全量替代 · 老的 cninfo / akshare 路径保留
+  - `_yahoo_v8_chart` 的 User-Agent 用 Windows Chrome · 测试过 macOS UA 偶尔 429
+  - em_kuaixun 响应格式是 `var ajaxResult={...}` 无尾 `;` · 正则用 `\s*;?\s*$` 兼容
+  - cfachina 大部分列表 JS 渲染 · 只能抓首页静态标题链接 · 深度内容需 Playwright
+  - 加新 news provider 时，要在 `_is_noise_news` 检查 title 是否会被 `_NOISE_KWS` 误过滤
+
+---
+
 ## v2.13.5 (2026-04-19 · NetworkProfile 自适应 + agent HARD-GATE 主动触发 Playwright)
 
 ### BUG · agent role-play 阶段不主动调 Playwright · 低质量数据未被兜底

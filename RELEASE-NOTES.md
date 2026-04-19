@@ -1,5 +1,73 @@
 # Release Notes
 
+## v2.13.7 — 2026-04-19 (wire new sources · 把 registry 登记的源真正接入 fetcher)
+
+> **背景**：v2.13.4 / v2.13.6 共加了 16 个新源到 `data_source_registry.py`，但只是 registry 层面的登记，实际 fetcher 并没用它们。v2.13.7 把这些源真正接入到对应 fetcher 里，让数据流通。
+
+### 核心改动
+
+| 模块 | 新接入源 | 说明 |
+|---|---|---|
+| `fetch_events.py` (15_events) | `news_providers` (jin10/em_kuaixun/em_stock_ann/ths) | 4 源统一聚合 · 补 cninfo + ak 盲区 |
+| `fetch_sentiment.py` (17_sentiment) | `news_providers` | 情绪增强 · 新闻正负词融合 heat 分数 |
+| `fetch_policy.py` (13_policy) | `_fetch_cfachina_titles` | 期货/商品 industry 专用 · 期货协会权威源 |
+| `lib/data_sources.py::_kline_us_chain` | `_yahoo_v8_chart` HTTP | 绕开 yfinance cookie/crumb 机制 · 直连 Chart v8 |
+| `lib/data_sources.py::_kline_hk_chain` | `_yahoo_v8_chart` HTTP | 港股第 4 层兜底 · 前 3 层（东财/新浪/yf）全败时用 |
+
+### 新增 `lib/news_providers.py`（160 行）
+
+统一聚合 4 个财经新闻源：
+- `fetch_jin10()` - 解析 `var newest = [...]` JS 变量（跳 JSONP 包装）
+- `fetch_em_kuaixun()` - 解析 `var ajaxResult={LivesList:[...]}` · 兼容无尾 `;` 响应
+- `fetch_em_stock_ann(stock_code)` - JSON API · 支持按 code 过滤公告
+- `fetch_ths_news_today()` - HTML regex · `<a class="title">` 提取
+
+**关键 API**：`get_news_multi_source(stock_code, stock_name, limit_per_source)` → `{sources: {...}, total_hits, sources_ok}` · 10 min 文件缓存在 `.cache/_global/news/`.
+
+### 新增 `_yahoo_v8_chart(symbol, range_)`
+
+直连 `query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range={range}` · 429 自动 retry 一次 · 返归一到东财中文列（日期/开盘/收盘/最高/最低/成交量）· 兼容 AAPL / 0700.HK / 9988.HK.
+
+### 实测
+
+```bash
+python3 lib/news_providers.py "" ""
+# sources_ok: 4/4 · total_hits: 31
+
+python3 -c "from lib.data_sources import _yahoo_v8_chart; print(len(_yahoo_v8_chart('AAPL','1mo')))"
+# 22
+python3 -c "from lib.data_sources import _yahoo_v8_chart; print(len(_yahoo_v8_chart('0700.HK','1mo')))"
+# 21
+```
+
+### 测试
+
+新增 `tests/test_v2_13_7_wire_new_sources.py` · 12 个回归：
+- `news_providers` 模块存在性 + NewsItem dataclass
+- `fetch_jin10` / `fetch_em_kuaixun` 正则解析（mocked HTTP）
+- `fetch_events` / `fetch_sentiment` 接入 `get_news_multi_source` 调用路径
+- `_yahoo_v8_chart` 解析 response + 429 retry 逻辑
+- `_kline_us_chain` yf/ak 全失败时兜底到 v8
+- `fetch_policy` 期货 industry 调 cfachina · 非期货不调
+
+**全量 217 passed**（baseline 205 + 12 新）。
+
+### 影响面
+
+- **A 股 15_events 数据密度提升**：之前仅 cninfo + ak.stock_news_em，过滤"资金流向"等噪音后常 < 3 条；加入 4 源聚合后 10-30 条可用新闻。
+- **17_sentiment heat 更准**：new_hit * 2 分 + 新闻正负词二次融合。
+- **美股/港股 K 线稳定性**：yfinance 2026 年多次因 cookie 机制失败；Yahoo v8 HTTP 直连是可靠兜底。
+- **期货/商品类 13_policy 更权威**：cfachina 首页标题抽取（行业论坛/峰会/研讨会）· 仅对"期货/衍生品/商品/金融/证券"industry 触发，不影响其他。
+
+### 版本
+
+- `2.13.6 → 2.13.7`
+- 4 manifest 同步（`.claude-plugin/plugin.json` / `.cursor-plugin/plugin.json` / `package.json` / `.version-bump.json`）
+- Branch: `feature/v2.13.7-wire-new-sources`
+- Tag: `v2.13.7`
+
+---
+
 ## v2.13.6 — 2026-04-19 (新增 6 个经 curl 验证的期货 + 财经新闻源)
 
 > **用户提供第二波 Grok 清单**（期货 + 财经新闻 · 10+ 端点）· 批量 curl 真实验证 · 6 有效新源登记

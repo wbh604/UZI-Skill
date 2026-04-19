@@ -859,11 +859,74 @@ def _kline_hk_chain(ti: TickerInfo, period: str, start: str, adjust: str) -> lis
         except Exception as e:
             errors.append(f"yfinance-hk: {type(e).__name__}: {str(e)[:80]}")
 
+    # ── 4. v2.13.7 · Yahoo Chart v8 HTTP fallback（Grok 验证源 · 零 Key）
+    try:
+        yf_code = f"{code5.lstrip('0') or '0'}.HK"
+        rows = _yahoo_v8_chart(yf_code, range_="2y")
+        if rows:
+            return rows
+    except Exception as e:
+        errors.append(f"yahoo-v8-hk: {type(e).__name__}: {str(e)[:80]}")
+
     return [{"_kline_fetch_error": "; ".join(errors) or "no HK source available"}]
 
 
+def _yahoo_v8_chart(symbol: str, range_: str = "2y") -> list[dict]:
+    """v2.13.7 · Yahoo Chart v8 HTTP fallback · Grok 清单验证 · 零 Key.
+
+    URL: query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range={range}
+    返回东财中文列格式（日期/开盘/收盘/最高/最低/成交量）· 与 akshare 对齐.
+    symbol 例：AAPL / 0700.HK / 9988.HK.
+    """
+    if not requests:
+        return []
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range={range_}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://finance.yahoo.com/",
+    }
+    # 429 时 retry 一次（Yahoo 常见瞬时限流）
+    try:
+        r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code == 429:
+            import time as _time
+            _time.sleep(2)
+            r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        result = (data.get("chart") or {}).get("result") or []
+        if not result:
+            return []
+        res0 = result[0]
+        ts_arr = res0.get("timestamp") or []
+        q = ((res0.get("indicators") or {}).get("quote") or [{}])[0]
+        opens = q.get("open") or []
+        closes = q.get("close") or []
+        highs = q.get("high") or []
+        lows = q.get("low") or []
+        vols = q.get("volume") or []
+        from datetime import datetime as _dt
+        rows: list[dict] = []
+        for i, ts in enumerate(ts_arr):
+            if i >= len(closes) or closes[i] is None:
+                continue
+            rows.append({
+                "日期": _dt.fromtimestamp(ts).strftime("%Y-%m-%d"),
+                "开盘": opens[i] if i < len(opens) and opens[i] is not None else closes[i],
+                "收盘": closes[i],
+                "最高": highs[i] if i < len(highs) and highs[i] is not None else closes[i],
+                "最低": lows[i] if i < len(lows) and lows[i] is not None else closes[i],
+                "成交量": vols[i] if i < len(vols) and vols[i] is not None else 0,
+            })
+        return rows
+    except Exception:
+        return []
+
+
 def _kline_us_chain(ti: TickerInfo) -> list[dict]:
-    """US K-line: yfinance → akshare → stooq HTTP fallback."""
+    """US K-line: yfinance → akshare → yahoo v8 → stooq HTTP fallback."""
     if yf:
         try:
             t = yf.Ticker(ti.code)
@@ -880,6 +943,10 @@ def _kline_us_chain(ti: TickerInfo) -> list[dict]:
                 return df.to_dict("records")
         except Exception:
             pass
+    # v2.13.7 · Yahoo Chart v8 HTTP（绕开 yfinance cookie/crumb 机制，更稳）
+    rows = _yahoo_v8_chart(ti.code, range_="2y")
+    if rows:
+        return rows
     if requests:
         try:
             url = f"https://stooq.com/q/d/l/?s={ti.code.lower()}.us&i=d"

@@ -74,6 +74,29 @@ def main(ticker: str) -> dict:
     hot_bonus = (hot_trend_mentions.get("total_hits", 0) or 0) * 5
     heat = min(100, heat + hot_bonus)
 
+    # v2.13.7 · 新闻情绪增强（金十/东财快讯/同花顺 · 比 ddgs 更实时）
+    news_multi: dict = {}
+    try:
+        from lib.news_providers import get_news_multi_source
+        news_multi = get_news_multi_source(stock_code=ti.code, stock_name=name, limit_per_source=15)
+        # 情绪增量：news_providers 命中项再跑一遍正负词统计
+        news_text = " ".join(
+            (it.get("title", "") + " " + it.get("body", ""))
+            for items in (news_multi.get("sources") or {}).values()
+            if isinstance(items, list)
+            for it in items
+            if isinstance(it, dict) and not it.get("error")
+        ).lower()
+        if news_text:
+            pos += sum(1 for kw in positive_kws if kw in news_text)
+            neg += sum(1 for kw in negative_kws if kw in news_text)
+            total2 = pos + neg if (pos + neg) > 0 else 1
+            positive_pct = round(pos / total2 * 100, 0)
+        news_hit = news_multi.get("total_hits", 0) or 0
+        heat = min(100, heat + news_hit * 2)
+    except Exception as _e:
+        news_multi = {"error": f"news_providers 异常: {type(_e).__name__}: {str(_e)[:60]}"}
+
     return {
         "ticker": ti.full,
         "data": {
@@ -89,8 +112,12 @@ def main(ticker: str) -> dict:
             # v2.12 · 社交热榜额外信号（散户情绪 · 补 ddgs 盲区）
             "hot_trend_mentions": hot_trend_mentions,
             "hot_trend_hit_count": hot_trend_mentions.get("total_hits", 0),
+            # v2.13.7 · 多源新闻实时情绪（金十/东财快讯/东财公告/同花顺）
+            "news_multi_source": news_multi,
+            "news_sources_ok": news_multi.get("sources_ok", 0),
+            "news_total_hits": news_multi.get("total_hits", 0),
         },
-        "source": "web_search:ddgs (多平台 site: query) + hottrend (v2.12 · 6 热榜)",
+        "source": "web_search:ddgs + hottrend (6 热榜) + news_providers (v2.13.7 · 4 新闻源)",
         "fallback": False,
     }
 
