@@ -231,6 +231,37 @@ def start_cloudflare_tunnel(port: int = 8976):
     return public_url
 
 
+def _maybe_prompt_update() -> None:
+    """v2.14.0 · CLI 启动时检测 GitHub 新版本 · interactive y/s/n.
+
+    - 非 TTY（CI / Codex sandbox / 管道重定向）自动 skip
+    - UZI_NO_UPDATE_CHECK=1 env 禁用
+    - 网络异常 / GH API 限流 → silent skip（不阻塞正常流程）
+    - 用户选 s · 记到 .cache/_global/update_check.json · 下一版本来之前不再弹
+    """
+    if not sys.stdin.isatty():
+        return
+    try:
+        from lib.update_check import check_for_update, format_prompt, handle_answer
+    except Exception:
+        return
+    try:
+        info = check_for_update()
+        if info is None:
+            return
+        print(format_prompt(info))
+        try:
+            ans = input("请选择 [y/s/n]（回车默认 n）: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        print(handle_answer(ans, info.latest))
+        print()
+    except Exception as _e:
+        # update check 永远不阻塞主流程
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="游资（UZI）Skills · 个股深度分析",
@@ -258,6 +289,9 @@ def main():
     # 设 UZI_CLI_ONLY=1 让 self_review 对 agent_analysis.json 缺失 / 低 coverage 做宽容处理
     # （降级为 warning，仍出报告）。
     os.environ.setdefault("UZI_CLI_ONLY", "1")
+
+    # v2.14.0 · 自动检测 GitHub 新版本 · interactive prompt(y/s/n) · 非 TTY 静默
+    _maybe_prompt_update()
 
     # v2.10.2 · 深度选择（优先级: --depth > UZI_DEPTH env > UZI_LITE env > 默认 medium）
     try:

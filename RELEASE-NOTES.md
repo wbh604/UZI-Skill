@@ -1,5 +1,93 @@
 # Release Notes
 
+## v2.14.0 — 2026-04-20 (自动检测 GitHub 新版本 · interactive y/s/n prompt)
+
+> **用户请求**：每次使用插件时自动检测 GitHub 是否有新版本 · 有更新时弹提示 + 改动说明 · 支持"是/跳过本版/否"三选 · 跳过本版后直到下一版出来才再弹。
+
+### 新增 `lib/update_check.py`（~180 行）
+
+核心 API：
+- `check_for_update(force=False) -> UpdateInfo | None` · 返 `{current, latest, notes, url}` 或 None
+- `mark_skipped(version)` · 记用户 skip 决策到 `.cache/_global/update_check.json`
+- `handle_answer(ans, latest)` · y/s/n 回答归一处理
+- `format_prompt(info)` · 统一展示模板（CLI + agent 共用）
+
+**状态文件** `.cache/_global/update_check.json`：
+```json
+{
+  "skipped_version": "2.14.1",
+  "last_check_at": 1713552000,
+  "cached_latest": "2.14.1"
+}
+```
+
+**三态逻辑**：
+- `current < latest` 且 `skipped_version != latest` → 弹提示
+- `current < latest` 且 `skipped_version == latest` → 跳过本次（等下一版再弹）
+- `current >= latest` → 不弹
+
+### 两档触发点
+
+1. **CLI 直跑**（`run.py` 顶部）：`_maybe_prompt_update()` · interactive `input("[y/s/n]")`
+   - 非 TTY（CI / Codex sandbox / 管道）自动跳过
+   - `UZI_NO_UPDATE_CHECK=1` env 禁用
+   - 网络异常 silent skip（不阻塞分析流程）
+
+2. **Agent 会话**（`hooks/session-start`）：后台检查 + 写 `.cache/_global/update_prompt.md`
+   - SKILL.md 新增 `HARD-GATE-UPDATE-PROMPT`：agent 第一次回应前必须读该文件 → 完整展示给用户 → 收集 y/s/n → 调 `handle_answer` 写回
+   - 处理完删除 prompt 文件，同会话不重复弹
+
+### 用户交互文案
+
+```
+📦 UZI-Skill 有新版本可更新：v2.13.7 → v2.14.0
+   https://github.com/wbh604/UZI-Skill/releases/tag/v2.14.0
+
+更新内容（前 600 字）：
+[从 release body 抓]
+
+选项：
+  [y] 是，我现在去更新
+  [s] 跳过本版（v2.14.0 之后有更新再提示）
+  [n] 否，下次启动再问
+```
+
+**更新命令分 agent 环境**：
+- Claude Code: `/plugin update stock-deep-analyzer`
+- git clone: `cd UZI-Skill && git pull`
+- Hermes: `hermes skills update wbh604/UZI-Skill/skills/deep-analysis`
+
+### 性能与可靠性
+
+- **GitHub API 缓存 6h** · 防 60 req/h 未认证限流 · cache 新鲜时直接读 `cached_latest` 判断，不打 API
+- **timeout 5s** · GFW / 慢网络快速 fail · silent skip 不阻塞主流程
+- **semver 匹配**：仅对正式 tag `v2.x.y` 比较 · pre-release / dev branch 不弹
+- **env 禁用**：`UZI_NO_UPDATE_CHECK=1` 跳过全部检查（CI / Codex 推荐设）
+
+### 测试
+
+新增 `tests/test_v2_14_0_update_check.py` · 13 个回归：
+- `_parse_semver` 基础 + 边界
+- `_newer` 比较
+- env 禁用
+- 同版本不弹 / 新版本弹
+- skip 同版不再弹 / skip 后新版再弹
+- 网络失败 silent skip
+- cache 生效不重复打 API
+- handle_answer y/s/n 三路径
+- `format_prompt` 含三选项
+
+**全量 230 passed**（baseline 217 + 13 新）。
+
+### 版本
+
+- `2.13.7 → 2.14.0`（minor bump · 新增用户可见功能）
+- 4 manifest 同步
+- Branch: `feature/v2.14.0-auto-update`
+- Tag: `v2.14.0`
+
+---
+
 ## v2.13.7 — 2026-04-19 (wire new sources · 把 registry 登记的源真正接入 fetcher)
 
 > **背景**：v2.13.4 / v2.13.6 共加了 16 个新源到 `data_source_registry.py`，但只是 registry 层面的登记，实际 fetcher 并没用它们。v2.13.7 把这些源真正接入到对应 fetcher 里，让数据流通。

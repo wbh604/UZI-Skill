@@ -5,21 +5,55 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# v2.14.0 · 后台触发 update check · 结果写到 .cache/_global/update_prompt.md
+# SKILL.md HARD-GATE-UPDATE-PROMPT 负责让 agent 读这个文件并展示给用户
+if [ -z "${UZI_NO_UPDATE_CHECK}" ] && command -v python3 >/dev/null 2>&1; then
+  (
+    cd "$PLUGIN_ROOT/skills/deep-analysis/scripts" 2>/dev/null
+    python3 -c "
+import sys, os
+from pathlib import Path
+sys.path.insert(0, '.')
+try:
+    from lib.update_check import check_for_update, format_prompt
+    info = check_for_update()
+    prompt_f = Path('.cache/_global/update_prompt.md')
+    prompt_f.parent.mkdir(parents=True, exist_ok=True)
+    if info is None:
+        # 清掉旧 prompt · 保持状态一致
+        if prompt_f.exists():
+            prompt_f.unlink()
+    else:
+        prompt_f.write_text(format_prompt(info) + '\\n[agent] 请把上面消息展示给用户，收到 y/s/n 后用 lib.update_check.handle_answer() 处理。\\n', encoding='utf-8')
+except Exception:
+    pass
+" 2>/dev/null &
+  )
+fi
+
 # Build the context message with skill summaries
 CONTEXT="$(cat <<'SKILLS_CONTEXT'
-🎯 游资（UZI）Skills v2.2 已加载
+🎯 游资（UZI）Skills v2.14 已加载
 
 ## 可用技能
 
 | 命令 | 说明 |
 |---|---|
-| `/analyze-stock <代码>` | 完整深度分析（22维 + 51评委 + Bloomberg报告） |
-| `/dcf <代码>` | DCF 估值 |
-| `/comps <代码>` | 同行对标 |
-| `/lbo <代码>` | LBO 压力测试 |
-| `/scan-trap <代码>` | 杀猪盘检测 |
+| `/stock-deep-analyzer:analyze-stock <代码>` | 完整深度分析（22维 + 51评委 + Bloomberg报告） |
+| `/stock-deep-analyzer:dcf <代码>` | DCF 估值 |
+| `/stock-deep-analyzer:comps <代码>` | 同行对标 |
+| `/stock-deep-analyzer:lbo <代码>` | LBO 压力测试 |
+| `/stock-deep-analyzer:scan-trap <代码>` | 杀猪盘检测 |
+| `/stock-deep-analyzer:segmental-model <代码>` | 分业务收入 bottom-up 建模 |
 
 说"分析 XXX"即可开始深度分析。
+
+## ⚠️ 自动更新检查（v2.14 新增）
+
+会话开始时，hook 会后台检测 GitHub 是否有新版本：
+- 检到新版 → 写 `.cache/_global/update_prompt.md`
+- Agent 必须在第一次响应用户前检查该文件，若存在则完整展示内容给用户，并收集 y/s/n 回答后调用 `lib.update_check.handle_answer(ans, latest)` 处理。
+- 用户选 s（skip）→ 该版本之后再有新版才会再弹。
 
 ## 工作流提醒
 

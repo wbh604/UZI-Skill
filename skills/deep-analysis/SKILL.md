@@ -31,6 +31,32 @@ description: 个股深度分析的核心工作流。当用户要求"深度分析
 5. **矛盾必须呈现，不准和稀泥**：DCF 与 Comps 结论冲突时，**把冲突写进报告**；51 评委分歧大时，**强调分歧本身是信息**。
 6. **Task 1 必须并行执行**（4 个子 agent / wave），串行跑 22 个 fetcher 直接扣分。
 
+### ⛔ HARD-GATE-UPDATE-PROMPT · 新版本提示（v2.14）
+
+<HARD-GATE>
+会话启动 hook 会后台检查 GitHub 最新 release，如果本地版本落后，会在
+`skills/deep-analysis/scripts/.cache/_global/update_prompt.md` 写入完整提示文案。
+
+**你必须在第一次回应用户前检查这个文件**：
+
+1. 读 `.cache/_global/update_prompt.md`（不存在 = 无需提示，跳过即可）
+2. 若存在 · 把文件完整内容作为 **第一条消息** 展示给用户
+3. 用 `AskUserQuestion` 或自然语言收集用户回答（y / s / n）
+4. 调用 `python3 -c "from lib.update_check import handle_answer; print(handle_answer('<ans>', '<latest>'))"` 把用户回答写回状态文件 · latest 从提示文案里的版本号提取
+5. 处理完删除 `.cache/_global/update_prompt.md`，这样同一会话不会重复弹
+6. 根据用户选择：
+   - `y` → 告诉用户按 README 安装章节的命令执行（Claude Code: `/plugin update stock-deep-analyzer` · git clone: `cd UZI-Skill && git pull` · Hermes: `hermes skills update wbh604/UZI-Skill/skills/deep-analysis`），然后继续用户原请求
+   - `s` → 直接继续用户原请求（handle_answer 已记 skip 到 cache）
+   - `n` → 直接继续用户原请求
+
+如果用户没有原请求（首次进入会话），展示完提示后等待用户开始对话。
+
+**绝不能**：
+- ❌ 跳过这个检查直接回应用户的分析请求
+- ❌ 把提示文案改短、改写、合并到其他消息里
+- ❌ 在用户只说 "分析 XX" 时直接开跑不先展示更新提示
+</HARD-GATE>
+
 ### ⛔ HARD-GATE-NAME · 股票名纠错（v2.3）
 
 <HARD-GATE>

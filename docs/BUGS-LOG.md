@@ -7,6 +7,37 @@
 
 ---
 
+## v2.14.0 (2026-04-20 · 自动检测 GitHub 新版本 · interactive prompt)
+
+### FEATURE · 自动更新检查
+- **需求**：用户每次使用插件时自动检测 GitHub 有没有新版本 · 有更新先提示用户是否更新 · 三选一（是/跳过本版/否）· 跳过本版后直到下一个更新版本出来之前不再跳弹窗
+- **实现位置**：
+  - `skills/deep-analysis/scripts/lib/update_check.py` · 核心模块（check_for_update + mark_skipped + cache）
+  - `run.py::_maybe_prompt_update()` · CLI 直跑 interactive
+  - `hooks/session-start` · agent 会话后台写 `.cache/_global/update_prompt.md`
+  - `SKILL.md::HARD-GATE-UPDATE-PROMPT` · agent 展示规则
+- **设计要点**：
+  - 6h cache 防 GitHub API 限流（60 req/h 未认证）
+  - semver 严格匹配 · 仅正式 tag 比较
+  - 3 态 skip 逻辑：`skipped_version == latest` 才跳过；一旦有更新版立刻再弹
+  - 非 TTY / `UZI_NO_UPDATE_CHECK=1` / 网络异常 全部 silent skip · 不阻塞主流程
+  - 状态文件 `.cache/_global/update_check.json`
+  - agent 环境走 `.cache/_global/update_prompt.md` 文件通道（因为 hook 无法直接跟用户 prompt）
+- **防滥用**：timeout 5s + exception 全 catch · 永远不因检查挂主流程
+- **回归测试**：`tests/test_v2_14_0_update_check.py` · 13 个 case
+  - parse_semver 边界 / newer 比较 / env 禁用 / 同版本不弹 / 新版本弹
+  - skip 后同版不弹 · 更新版本再弹
+  - 网络失败 silent skip · cache 不重复打 API
+  - handle_answer y/s/n 三路径 · format_prompt 含三选项
+- **未来改该区域注意事项**：
+  - `UZI_NO_UPDATE_CHECK=1` 在 CI / Codex 环境必须默认设 · 防阻塞
+  - `check_for_update` 内部任何异常都要 catch 不能抛 · 主流程绝不被 update 检查影响
+  - `mark_skipped` 只记 version · 不记时间 · 因为"跳过本版"语义与时间无关（除非 latest 变了）
+  - GitHub API 未来可能变 schema · 只读 `tag_name` 和 `body` 两个字段 · 兼容性最大
+  - hook 写 prompt 文件走 async `&` · 阻塞 session-start 会拖慢 agent 启动
+
+---
+
 ## v2.13.7 (2026-04-19 · wire new sources · registry 登记但 fetcher 没用的 16 源接入)
 
 ### BUG · v2.13.4 / v2.13.6 新增源只登记未接入 · 数据流通失效

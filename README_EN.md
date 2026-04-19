@@ -12,7 +12,7 @@
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-17-red)]()
 [![Self-Review](https://img.shields.io/badge/Self--Review-13%20checks-blueviolet)](skills/deep-analysis/scripts/lib/self_review.py)
 
-**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. v2.13.7: 16 news / futures / market-data sources wired · NetworkProfile adaptive · mechanical self-review gate (13 checks).**
+**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. v2.14.0: auto GitHub update check (y/s/n prompt) · v2.13.7: 16 news / futures / market-data sources wired · mechanical self-review gate (13 checks).**
 
 [Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-51-investor-jury) · [Methods](#-17-institutional-methods) · [Self-Review Gate 🆕](#-mechanical-self-review-gate-new-in-v29) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq)
 
@@ -351,6 +351,9 @@ A: Yes. akshare / Eastmoney / XueQiu / CNInfo / HKEXNews all serve international
 
 **Q: How do I know the report I'm about to read is reliable?**
 A: As of v2.9, self-review is **mechanically enforced**. 13 automated checks run before HTML generation; if any critical check fails, the report *physically cannot be shipped*. Check `.cache/<ticker>/_review_issues.json` for any warnings, each with a `suggested_fix`. Every time a new BUG is fixed, a matching check is added — so the same class of bug will be **auto-caught next run, no user feedback needed**.
+
+**Q: Does the plugin auto-notify me about new versions?**
+A: Yes, since v2.14.0. Every CLI run or agent session silently polls `api.github.com/.../releases/latest`; if a newer tag is out, you get a 3-option prompt (yes / skip-this-version / no) with the release notes summary. "Skip" suppresses the prompt only for that specific tag — once a newer version drops, you'll be asked again. Disable with `export UZI_NO_UPDATE_CHECK=1` (recommended for CI / Codex). Cached 6h to stay under GitHub's 60-req/h unauthenticated limit.
 
 **Q: I ran analyses on earlier versions — were those reports correct?**
 A: If you analyzed "industrial metals / machine tools / industrial machinery" stocks (like Yunnan Aluminum / 云铝股份 `000807.SZ`) before 2026-04-17, the `7_industry` dim was misclassified as "agricultural food processing" (BUG#R10). Clear the cache and re-run:
