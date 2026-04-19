@@ -229,9 +229,19 @@ def match_seats_in_lhb(lhb_records: list[dict]) -> dict[str, list[dict]]:
     return matches
 
 
+# v2.13.3 · 游资通用大市值上界（元）· fit_rules 未显式设 max_mcap 时生效
+# 理由：A 股游资几乎不玩 500 亿以上大盘股（流动性不足以拉动 · 外资/机构主场）
+# 例外：章盟主做过茅台大盘（2020 牛市）· 单独 allowlist 不限上限
+FALLBACK_YOUZI_MAX_MCAP_YUAN = 50_000_000_000  # 500 亿元
+_MEGA_CAP_ALLOWLIST = frozenset({"章盟主"})  # 可做大盘的游资
+
+
 def is_in_range(nickname: str, ticker_features: dict) -> bool:
     """Check if a stock fits a 游资's射程 based on its fit_rules.
     ticker_features should provide: market_cap, trend, is_sector_leader, sentiment_cycle, etc.
+
+    v2.13.3 升级：对未显式设 max_mcap 的游资，隐式用 500 亿上限（除非在 allowlist）。
+    原因：A 股游资实操不碰超大盘，9000+ 亿这种根本拉不动。
     """
     info = SEATS.get(nickname)
     if not info:
@@ -242,6 +252,10 @@ def is_in_range(nickname: str, ticker_features: dict) -> bool:
         return False
     if "max_mcap" in rules and mc > rules["max_mcap"]:
         return False
+    # v2.13.3 · 隐式大市值上限
+    if "max_mcap" not in rules and nickname not in _MEGA_CAP_ALLOWLIST:
+        if mc > FALLBACK_YOUZI_MAX_MCAP_YUAN:
+            return False
     for k, v in rules.items():
         if k.startswith(("min_", "max_")):
             continue

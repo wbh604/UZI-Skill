@@ -171,19 +171,45 @@ KLARMAN_RULES = [
 # B 组 · 成长投资派 (4 人)
 # ═══════════════════════════════════════════════════════════════
 
+# v2.13.3 · 林奇方法论还原 · 依据 One Up on Wall Street (1989) / Beating the Street (1993)
+# 关键原则：
+# 1. "PE should be approximately equal to growth rate" · PEG ≈ 1 是理想
+# 2. "PE > 40 like buying a Rolls Royce" · 40 是 PE 警戒线
+# 3. Fast grower sweet spot：20-50% growth
+# 4. 历史持仓 PEG 几乎都 < 1（Taco Bell 0.6 / Hanes 0.2 / Ford / Fannie Mae 0.6）
+def _peg(f):
+    """PEG = PE / growth rate · 缺失时返 999（fail 所有 PEG rules）."""
+    pe = f.get("pe", 0) or 0
+    growth = f.get("revenue_growth_latest", 0) or 0
+    if pe <= 0 or growth <= 0:
+        return 999
+    return pe / growth
+
+
 LYNCH_RULES = [
-    Rule("peg_reasonable", "PEG < 1.5 (PEG=PE/增速)", 5,
-         check=lambda f: 0 < f.get("pe", 0) / max(f.get("revenue_growth_latest", 1), 1) < 1.5,
-         pass_msg="PEG ≈ {pe}/{revenue_growth_latest:.0f} < 1.5",
-         fail_msg="PEG 不够吸引"),
-    Rule("fast_grower", "营收增速 > 20%", 4,
-         check=lambda f: f.get("revenue_growth_latest", 0) > 20,
-         pass_msg="营收增速 {revenue_growth_latest:.1f}%",
-         fail_msg="营收增速仅 {revenue_growth_latest:.1f}%"),
+    # 核心：PEG < 1 · 林奇理想值（真实历史阈值）
+    Rule("peg_ideal", "PEG < 1 (林奇理想值)", 5,
+         check=lambda f: 0 < _peg(f) < 1.0,
+         pass_msg="PEG ≈ {pe}/{revenue_growth_latest:.0f} < 1 (林奇理想)",
+         fail_msg="PEG 未进入林奇理想区间 (< 1)"),
+    # 次优：PEG 1-1.5 临界接受
+    Rule("peg_acceptable", "PEG 1-1.5 (临界接受)", 3,
+         check=lambda f: 1.0 <= _peg(f) < 1.5,
+         pass_msg="PEG ≈ {pe}/{revenue_growth_latest:.0f} · 临界接受",
+         fail_msg="PEG 不在 1-1.5 临界区"),
+    # v2.13.3 新增 · PE 40 警戒线（林奇原话 "Rolls Royce" 级别）
+    Rule("pe_not_rolls_royce", "PE < 40 (林奇警戒线)", 3,
+         check=lambda f: 0 < f.get("pe", 999) < 40,
+         pass_msg="PE {pe:.0f} 在舒适区",
+         fail_msg="PE {pe:.0f} > 40 · 林奇警戒（Rolls Royce 不是必要品）"),
+    # Fast grower sweet spot 20-50%
+    Rule("fast_grower_zone", "营收增速 20-50% (林奇 fast grower sweet spot)", 3,
+         check=lambda f: 20 < f.get("revenue_growth_latest", 0) < 50,
+         pass_msg="营收增速 {revenue_growth_latest:.0f}% · fast grower",
+         fail_msg="增速 {revenue_growth_latest:.0f}% 超出 20-50% 区间"),
     Rule("understandable", "行业好懂", 2,
          check=lambda f: True,
-         pass_msg="行业易理解",
-         fail_msg="—"),
+         pass_msg="行业易理解"),
     Rule("research_support", "研报覆盖中性偏上", 2,
          check=lambda f: f.get("research_coverage", 0) >= 5 and f.get("buy_rating_pct", 0) >= 60,
          pass_msg="{research_coverage:.0f} 家研报 · 买入 {buy_rating_pct:.0f}%",
@@ -232,18 +258,32 @@ THIEL_RULES = [
          fail_msg="规模优势不足"),
 ]
 
+# v2.13.3 · 木头姐方法论还原 · ARK Invest 五大颠覆性创新平台
+# 两处 bug 修复：
+# 1. 字段名错：读 industry_growth_pct · 实际 stock_features 设的是 industry_growth
+#    结果中际旭创（光模块行业增速 40%）读成 0 · 被误判"增长太慢"
+# 2. 白名单缺 CPO/光模块/算力/数据中心/HBM 等 AI 基建关键词 ·
+#    ARK 实际持 NVDA/TSM/Palantir 等 AI 上下游 · 光模块绝对在她视野里
 WOOD_RULES = [
     Rule("s_curve", "行业处于 S 曲线拐点 (TAM > 20%/年)", 5,
-         check=lambda f: f.get("industry_growth_pct", 0) > 20,
-         pass_msg="行业增速 {industry_growth_pct:.0f}% — S 曲线拐点",
-         fail_msg="行业增速 {industry_growth_pct:.0f}% < 20%，增长太慢"),
+         # v2.13.3 · 字段名统一为 industry_growth（stock_features 口径）
+         check=lambda f: (f.get("industry_growth") or f.get("industry_growth_pct", 0)) > 20,
+         pass_msg="行业增速 {industry_growth:.0f}% — S 曲线拐点",
+         fail_msg="行业增速 {industry_growth:.0f}% < 20%，增长太慢"),
     Rule("innovation_platform", "属于 ARK 颠覆式创新平台", 5,
          check=lambda f: any(kw in (f.get("industry", "") + " " + f.get("name", "")).lower()
-                            for kw in ["光学", "半导体", "电池", "锂电", "AI", "人工智能",
-                                       "生物", "基因", "机器人", "量子", "空间", "卫星",
-                                       "AR", "VR", "自动驾驶", "新能源", "储能",
-                                       "3D打印", "区块链", "数字货币", "mRNA",
-                                       "脑机", "核聚变"]),
+                            for kw in [
+                                # 原有 · AI / 半导体 / 生物 / 新能源 等
+                                "光学", "半导体", "电池", "锂电", "AI", "人工智能",
+                                "生物", "基因", "机器人", "量子", "空间", "卫星",
+                                "AR", "VR", "自动驾驶", "新能源", "储能",
+                                "3D打印", "区块链", "数字货币", "mRNA",
+                                "脑机", "核聚变",
+                                # v2.13.3 新增 · AI 算力基建 · CPO/光模块等
+                                "光模块", "CPO", "光芯片", "算力", "数据中心",
+                                "IDC", "HBM", "gpu", "通信设备", "光通信",
+                                "云计算", "服务器", "存储芯片",
+                            ]),
          pass_msg="🔮 属于颠覆式创新平台 — 这是我们的菜！",
          fail_msg="不在 ARK 五大创新平台范畴"),
     Rule("revenue_acceleration", "营收加速或高增长", 3,
@@ -261,10 +301,21 @@ WOOD_RULES = [
 # ═══════════════════════════════════════════════════════════════
 
 SOROS_RULES = [
-    Rule("sentiment_divergence", "价格偏离基本面 (研报目标价 vs 现价差 > 10%)", 4,
-         check=lambda f: abs(f.get("upside_to_target", 0)) > 10,
-         pass_msg="研报目标涨幅 {upside_to_target:.0f}% (反身性差)",
-         fail_msg="价格与基本面共识"),
+    # v2.13.3 · 修反身性判定方向错误
+    # 原 bug：abs(upside) > 10 → 目标价 -63%（看跌）也 pass 打"反身性差"看多
+    # 修：只在 upside > 10%（研报认为显著低估）时 pass · 做多反身性信号
+    # 研报看跌场景（upside < -10）不在本 rule 处理 · 应由下方 bearish rule 识别
+    Rule("sentiment_long_reflex", "研报目标价显著高于现价 > 10% (做多反身性机会)", 4,
+         check=lambda f: f.get("upside_to_target", 0) > 10,
+         pass_msg="研报目标涨幅 {upside_to_target:.0f}% · 市场过度悲观 · 做多反身性",
+         fail_msg="价格不低于基本面共识 · 无做多反身性空间"),
+    # v2.13.3 新增 · 识别做空反身性（价格 >>  基本面预期）
+    # 索罗斯著名空单：1992 英镑、2010 黄金、2013 日元 · 都是价格超涨做空
+    # 目标价低于现价 -15% 以上 · 说明市场狂热脱离基本面
+    Rule("sentiment_short_reflex_penalty", "研报目标价低于现价 > 15% (做空反身性 · 做多方减分)", 4,
+         check=lambda f: f.get("upside_to_target", 0) > -15,
+         pass_msg="研报目标涨幅 {upside_to_target:.0f}% · 未到狂热",
+         fail_msg="研报目标涨幅 {upside_to_target:.0f}% · 市场过度狂热 · 索罗斯会考虑做空"),
     Rule("macro_tailwind", "宏观环境配合", 3,
          check=lambda f: f.get("macro_rate_easing", False),
          pass_msg="利率周期 {macro_rate_cycle}",
@@ -412,6 +463,12 @@ DUAN_RULES = [
          check=lambda f: f.get("pe_quantile_5y", 100) < 50,
          pass_msg="PE {pe_quantile_5y} 分位",
          fail_msg="价格不对，PE {pe_quantile_5y} 分位"),
+    # v2.13.3 · 段永平 PE 红线（历史买入苹果 PE~18 · 茅台 PE~30 · 腾讯 PE~25 都是相对便宜时介入）
+    # 原话：买股票跟买公司一样，关键是"价"要合理。对 PE 50+ 他永远说 "贵了"
+    Rule("pe_not_expensive", "PE 不超过 40 (段永平价格红线)", 3,
+         check=lambda f: 0 < f.get("pe", 999) < 40,
+         pass_msg="PE {pe:.0f} 在段永平舒适区",
+         fail_msg="PE {pe:.0f} 太贵 · 段永平历史买入都是相对便宜时"),
     Rule("long_term_clear", "10 年看得懂 (护城河 + 成熟业务)", 3,
          check=lambda f: f.get("moat_total", 0) >= 22 and f.get("consecutive_profit_years", 0) >= 5,
          pass_msg="商业模式可见 10 年",
@@ -431,6 +488,11 @@ ZHANGKUN_RULES = [
          check=lambda f: f.get("moat_intangible", 0) >= 7,
          pass_msg="无形资产 {moat_intangible:.0f}/10",
          fail_msg="品牌壁垒不强"),
+    # v2.13.3 · 张坤历史重仓茅台/五粮液/腾讯 PE 15-35 之间 · 不碰 PE > 40
+    Rule("pe_discipline", "PE 不超过 40 (张坤估值纪律)", 3,
+         check=lambda f: 0 < f.get("pe", 999) < 40,
+         pass_msg="PE {pe:.0f} 符合张坤估值纪律",
+         fail_msg="PE {pe:.0f} 超出张坤历史持仓估值上限"),
 ]
 
 ZHUSHAOXING_RULES = [
@@ -483,6 +545,11 @@ DENGXIAOFENG_RULES = [
          check=lambda f: f.get("roic", 0) > 10 or f.get("roe_latest", 0) > 12,
          pass_msg="价值创造 ROIC/ROE 达标",
          fail_msg="价值创造不足"),
+    # v2.13.3 · 邓晓峰偏价值风格 · 历史持仓白酒/地产/银行/周期股 PE 都偏低
+    Rule("pe_reasonable", "PE 不超过 35 (邓晓峰偏左侧)", 3,
+         check=lambda f: 0 < f.get("pe", 999) < 35,
+         pass_msg="PE {pe:.0f} 偏左侧符合邓晓峰风格",
+         fail_msg="PE {pe:.0f} 过高 · 邓晓峰偏左侧出击"),
     Rule("good_price", "恰当价格 (PE 分位 < 60)", 3,
          check=lambda f: f.get("pe_quantile_5y", 100) < 60,
          pass_msg="PE 分位 {pe_quantile_5y}",
@@ -494,24 +561,16 @@ DENGXIAOFENG_RULES = [
 # ═══════════════════════════════════════════════════════════════
 
 def _youzi_base_rules(min_mcap=None, max_mcap=None, need_stage_2=True, need_lhb=False, need_sector_leader=False):
-    """Generate standard 游资 rules."""
+    """Generate standard 游资 rules.
+
+    v2.13.3 · min_mcap/max_mcap 不再作为 Rule 打分（避免"市值超标"反向判看多/看空）。
+    市值射程由 investor_evaluator._is_youzi_out_of_range 前置 skip 处理。
+    这里的 min_mcap/max_mcap 参数保留是为了 seat_db 仍能读取射程定义，不影响规则评分。
+    """
     rules = []
-    if min_mcap is not None:
-        rules.append(Rule(
-            "min_mcap", f"市值 > {min_mcap} 亿",
-            3,
-            check=lambda f, mc=min_mcap: f.get("market_cap_yi", 0) > mc,
-            pass_msg=f"市值 {{market_cap_yi:.0f}} 亿 > {min_mcap} 亿",
-            fail_msg=f"市值 {{market_cap_yi:.0f}} 亿 < {min_mcap} 亿 不在射程"
-        ))
-    if max_mcap is not None:
-        rules.append(Rule(
-            "max_mcap", f"市值 < {max_mcap} 亿",
-            3,
-            check=lambda f, mc=max_mcap: f.get("market_cap_yi", 0) < mc,
-            pass_msg=f"市值 {{market_cap_yi:.0f}} 亿 < {max_mcap} 亿",
-            fail_msg=f"市值 {{market_cap_yi:.0f}} 亿 超 {max_mcap} 亿"
-        ))
+    # v2.13.3 · 移除 min_mcap / max_mcap 作为 Rule
+    # 原版 bug：市值 > min_mcap = pass 给分 · 导致 9000+ 亿大盘股对每个游资都"在射程"
+    # 现在由 evaluator 前置 skip 处理（超 500 亿默认跳过）
     if need_stage_2:
         rules.append(Rule(
             "stage_2", "Stage 2 上升",

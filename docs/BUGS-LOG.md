@@ -7,6 +7,64 @@
 
 ---
 
+## v2.13.3 (2026-04-19 · 51 评委规则全员历史立场还原)
+
+### BUG · 19 位评委给中际旭创 100 分 · 立场与历史严重不符
+- **症状**：用户截图报告 "彼得·林奇 100 分 · 看多 · PEG ≈ 63.253/60 < 1.5" 质疑"林奇历史上不会这么激进"。扫描面板发现 19 人 100 分（13 位游资 + 林奇 + 索罗斯 + 段永平 + 张坤 + 邓晓峰 etc），木头姐 13 分看空（CPO 是她赛道）
+- **位置**：`lib/investor_criteria.py` 多处规则 · `lib/investor_evaluator.py` · `lib/seat_db.py`
+- **5 处根因**：
+
+  1. **F 组游资射程反向判定**：`_youzi_base_rules` 把 `market_cap > min_mcap` 当打分依据 · 9456 亿对所有游资都"在射程" · 13 位游资误打 100/25。`is_in_range` 定义了但 evaluator 从未调用
+
+  2. **索罗斯反身性方向错**：`abs(upside_to_target) > 10` · 目标价 -63%（看空信号）也判"反身性差 = 看多 100"。`abs` 是 bug
+
+  3. **林奇 PEG 过松 + 无 PE 红线**：`peg_reasonable PEG < 1.5` 太松 · 无 PE 上限。但林奇原话 "PE should approximately equal growth rate" (PEG ≤ 1) 和 "PE > 40 like Rolls Royce"（历史持仓 Taco Bell 0.6/Hanes 0.2/Fannie Mae 0.6 均 PEG < 1）
+
+  4. **木头姐双 bug**：(a) `check=lambda f: f.get("industry_growth_pct", 0) > 20` · 但 stock_features v2.12.1 设的是 `industry_growth`（不带 _pct）· 中际旭创 40% 读成 0 · 判"增长太慢"看空。(b) 白名单缺 CPO/光模块/算力/数据中心/HBM · AI 基建本是 ARK 核心赛道
+
+  5. **中国价投派无 PE 红线**：段永平/张坤/邓晓峰 rules 只看 `pe_quantile_5y < 50` 不看绝对 PE · 高估值成长股也 100 分。历史：段买苹果 PE 18 / 茅台 PE 30；张坤重仓 PE 15-35 区间；邓晓峰偏左侧
+
+- **影响**：所有高 PE 成长股（CPO/光模块/AI/新能源等）的评委分布都被扭曲 · 5 大类评委立场都与历史不符 · 核心卖点"51 评委量化投票"的可信度崩塌
+
+- **修法**：
+  1. `seat_db.is_in_range` 加隐式 500 亿大市值上限 + `_MEGA_CAP_ALLOWLIST = {"章盟主"}`
+  2. `investor_evaluator.evaluate` 加 `_is_youzi_out_of_range` 前置检查 · F 组超射程 skip
+  3. `_youzi_base_rules` 移除 min_mcap/max_mcap 作为 Rule
+  4. SOROS_RULES 拆 `sentiment_long_reflex`（只 upside > +10 pass）+ `sentiment_short_reflex_penalty`（upside < -15 扣分）
+  5. LYNCH_RULES 6 条：`peg_ideal (PEG<1, 5分)` + `peg_acceptable (PEG 1-1.5, 3分)` + `pe_not_rolls_royce (PE<40, 3分)` + `fast_grower_zone (20-50%, 3分)` + `understandable (2)` + `research_support (2)`
+  6. WOOD_RULES 字段兼容 `industry_growth` · 白名单加 CPO/光模块/算力等 12 词
+  7. DUAN_RULES/ZHANGKUN_RULES/DENGXIAOFENG_RULES 各加 `pe_not_expensive`（PE<40/40/35）
+
+- **验证**（300308.SZ 实测）：
+  | 评委 | v2.13.2 | v2.13.3 |
+  |---|---|---|
+  | 林奇 | 100 bullish | 38 neutral |
+  | 索罗斯 | 100 bullish | 42 neutral |
+  | 段永平 | 100 bullish | 84 bullish |
+  | 张坤 | 100 bullish | 78 bullish |
+  | 邓晓峰 | 100 bullish | 76 bullish |
+  | 木头姐 | 13 bearish | 80 bullish |
+  | F 组 22 位游资 | 全打分 | 全 skip（射程外） |
+  - 100 分从 19 人 → 5 人 · skip 从 1 → 23 人
+
+- **回归测试**：`tests/test_v2_13_3_investor_rules.py` 15 用例
+  - F 组：out_of_range / allowlist 章盟主 / small cap in range / 非游资不受影响
+  - 索罗斯：+30 bullish / -63 bearish / +5 neutral 三方向
+  - 林奇：PEG < 1 / PE 63 reject / PEG 1-1.5 临界
+  - 木头姐：CPO 识别 + industry_growth 新字段兼容
+  - 段永平/张坤：PE 63 扣分 + PE 30 高分护栏
+  - 全量 173 passed（v2.13.2 158 + 新 15）
+
+- **若未来改评委规则**：
+  - **核心护栏 · 林奇的 PE 40 红线不能去掉**（历史持仓数据支撑 · Rolls Royce 原话）
+  - **索罗斯反身性 abs() 绝对值是已知反向 bug**（目标价 -63% 不是 "反身性差 = 看多"）
+  - **F 组游资必须 is_in_range 前置 skip**（大市值股游资不玩 · 9000 亿拉不动）
+  - **中国价投派 PE 红线对应各自历史风格**（段 40 / 张 40 / 邓 35）· 改动需说明历史出处
+  - **木头姐字段名用 `industry_growth` 口径**（与 stock_features 保持一致 · v2.12.1 字段）
+  - 加新评委规则要同时加历史依据（书/年报/访谈 URL）到 `lib/investor_knowledge.py`
+
+---
+
 ## v2.13.2 (2026-04-19 · Playwright 触发逻辑升级 · 数据质量感知 + FORCE flag)
 
 ### BUG · 维度有 data 但值都是 "—"/空时 Playwright 兜底未触发

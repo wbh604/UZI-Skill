@@ -28,6 +28,39 @@ from lib.investor_db import INVESTORS as _INVESTORS
 
 # v2.8 · 预构建 id → group 索引，用于 profile 的 group-level fallback
 _INVESTOR_GROUP_MAP: dict[str, str] = {inv["id"]: inv.get("group", "") for inv in _INVESTORS}
+# v2.13.3 · F 组射程检查用：id → 中文 name（供 seat_db.is_in_range 查 SEATS key）
+_INVESTOR_NAME_MAP: dict[str, str] = {inv["id"]: inv.get("name", "") for inv in _INVESTORS}
+
+
+def _is_youzi_out_of_range(investor_id: str, features: dict) -> tuple[bool, str]:
+    """v2.13.3 · F 组游资射程前置检查.
+
+    对 F 组投资者 · 调 seat_db.is_in_range · 不在射程则 skip（不打分）.
+    解决 v2.13.2 之前"大市值股对所有游资都判看多/看空"的 bug.
+
+    Returns:
+        (out_of_range: bool, reason: str)
+    """
+    if _INVESTOR_GROUP_MAP.get(investor_id) != "F":
+        return False, ""
+    try:
+        from lib.seat_db import SEATS, is_in_range
+    except Exception:
+        return False, ""
+    nickname = _INVESTOR_NAME_MAP.get(investor_id, "")
+    if not nickname or nickname not in SEATS:
+        return False, ""  # seat 没定义 · 不做 skip 决策
+    # is_in_range 需要 market_cap 字段（元）· features 里常叫 market_cap_yi（亿）或 market_cap
+    mc = features.get("market_cap") or 0
+    # 兼容：features 可能只有 market_cap_yi（亿）· 换算为元
+    if not mc and features.get("market_cap_yi"):
+        mc = float(features["market_cap_yi"]) * 1e8
+    probe = dict(features)
+    probe["market_cap"] = mc
+    if not is_in_range(nickname, probe):
+        mc_yi = mc / 1e8 if mc else 0
+        return True, f"市值 {mc_yi:.0f} 亿不在 {nickname} 射程"
+    return False, ""
 
 
 # ────────────────────────────────────────────────────────────────
@@ -88,6 +121,11 @@ def evaluate(investor_id: str, features: dict) -> dict:
     # If this investor wouldn't look at this market at all → "不适合"
     if not rc["should_evaluate"]:
         return _skip_result(investor_id, rc["skip_reason"] or "不在能力圈")
+
+    # v2.13.3 · F 组游资射程前置检查 · 大市值超射程直接 skip 不打分
+    out_of_range, range_reason = _is_youzi_out_of_range(investor_id, features)
+    if out_of_range:
+        return _skip_result(investor_id, range_reason)
 
     rules: list[Rule] = INVESTOR_RULES.get(investor_id, [])
     if not rules:

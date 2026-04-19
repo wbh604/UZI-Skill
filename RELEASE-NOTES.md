@@ -1,5 +1,85 @@
 # Release Notes
 
+## v2.13.3 — 2026-04-19 (51 评委规则全员历史立场还原)
+
+> **用户反馈**："林奇是不是有点激进？他历史上的持仓和操作，麻烦你核对一下" · 中际旭创 300308.SZ 实测发现 **19 人给 100 分** 严重不合理，多位评委立场与历史不符
+
+### 根因诊断
+
+从 300308 面板扫描 v2.13.2 分数分布：
+- 19 人给 100 分（含 13 位游资 + 林奇 + 索罗斯 + 段永平 + 张坤 + 邓晓峰）
+- 木头姐 13 分看空（CPO 本是她核心赛道，被判 0% 行业增速）
+- F 组游资"市值 9456 亿 > 150 亿 = 看多 100" / "超 80 亿 = 看空"（反向 bug）
+
+### 5 处规则修复
+
+**Fix 1 · F 组游资射程**
+- `seat_db.is_in_range` 加隐式 500 亿大市值上限（章盟主 allowlist 除外，历史做过茅台大盘）
+- `investor_evaluator._is_youzi_out_of_range` 前置检查 · 超射程直接 skip 不打分
+- `_youzi_base_rules` 移除 min_mcap/max_mcap 作为 Rule（避免"市值超标"反向打分）
+- **300308 效果**：F 组 22/23 人正确 skip（原 13 人错打高分）
+
+**Fix 2 · 索罗斯反身性方向**
+- 原 bug：`abs(upside_to_target) > 10` · 目标价 -63% 也被判"反身性差 = 看多 100"
+- 修：拆两条规则
+  - `sentiment_long_reflex` · 只在 upside > +10% 时 pass（做多反身性）
+  - `sentiment_short_reflex_penalty` · upside < -15% 扣分（识别市场狂热）
+- **300308 效果**：索罗斯 100 → 42 neutral · "无做多反身性空间"
+
+**Fix 3 · 林奇 PEG 严格化 + PE 40 红线**
+- 依据 *One Up on Wall Street (1989)* / *Beating the Street (1993)*：
+  - PEG ≤ 1 理想（Taco Bell 0.6 / Hanes 0.2 / Fannie Mae 0.6 均低于 1）
+  - PE > 40 "like buying a Rolls Royce" · 林奇警戒线
+  - Fast grower sweet spot 20-50%
+- 原版单条 `peg_reasonable PEG < 1.5` 过松 · 拆 6 条：
+  - `peg_ideal` PEG < 1（5 分）
+  - `peg_acceptable` PEG 1-1.5（3 分）
+  - `pe_not_rolls_royce` PE < 40（3 分）← 新增
+  - `fast_grower_zone` 20-50%（3 分）
+  - `understandable` + `research_support`（2+2 分）
+- **300308 效果**：林奇 100 → 38 neutral · "PE 63 · Rolls Royce 不是必要品"
+
+**Fix 4 · 木头姐颠覆性判定**
+- 两处 bug：
+  - 字段名错：读 `industry_growth_pct` · 实际 stock_features 设的是 `industry_growth` · 中际旭创读成 0 判"增长太慢"
+  - 白名单缺 CPO/光模块/算力/数据中心/HBM · AI 基建本是 ARK 核心赛道
+- 修：字段兼容读 · 白名单加 AI 算力相关 12 个关键词
+- **300308 效果**：木头姐 13 bearish → 80 bullish · "行业增速 40% — S 曲线拐点"
+
+**Fix 5 · 中国价投派 PE 红线**
+- 段永平：历史买苹果 PE 18 / 茅台 PE 30 / 腾讯 PE 25 · 对 PE 50+ 永远"贵了"
+- 张坤：重仓茅台/五粮液/腾讯 PE 15-35 区间
+- 邓晓峰：偏左侧风格 · 白酒/地产/银行/周期股 PE 都偏低
+- 各加 1 条 PE 红线规则（段 PE<40 · 张 PE<40 · 邓 PE<35）
+- **300308 效果**：段永平 100→84 · 张坤 100→78 · 邓晓峰 100→76（仍看多但不再狂热）
+
+### 评分分布对照（300308.SZ）
+
+| 桶 | v2.13.2 | v2.13.3 |
+|---|---|---|
+| 100 分 | **19 人** | **5 人** |
+| 70-99 | 2 | 12 |
+| 40-69 | 7（neutral/bearish） | 7 |
+| < 40 | 9（含 4 游资 misjudged） | 4 |
+| skip | 1 | **23**（F 组 22 + 索普） |
+| consensus | 78 | **81.4**（分母 28，质量提升） |
+
+### 回归测试
+
+- 新增 `tests/test_v2_13_3_investor_rules.py` · **15 个用例**
+  - Fix 1 · 4 游资射程 scenarios
+  - Fix 2 · 索罗斯 3 方向（看多/看空/neutral）
+  - Fix 3 · 林奇 3 PEG 区间
+  - Fix 4 · 木头姐 CPO 识别 + 字段兼容
+  - Fix 5 · 段永平/张坤 PE 红线 + 护栏
+- 全量 **173 passed**（v2.13.2 158 + 新 15）
+
+### 升级
+
+`git pull origin main` · 老 cache 下次 stage1 自动用新规则重算 panel.json · 无需 --no-resume（v2.9 的 panel 不 cache · 每次都重算）
+
+---
+
 ## v2.13.2 — 2026-04-19 (Playwright 触发逻辑升级 · 数据质量感知 + FORCE flag)
 
 > **用户反馈**："有很多网站爬不到内容，也没有拉起 Playwright" · 诊断发现三个根因：(1) v2.13.1 之前 cache 没 Playwright 字段 (2) `_dim_needs_fallback` 只看 `len(data)` 不看值质量 (3) skip 时无日志告诉用户为什么
