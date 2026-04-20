@@ -35,6 +35,43 @@ def _is_garbage(text: str) -> bool:
     return sum(1 for p in _GARBAGE_PATTERNS if p in text) >= 2
 
 
+# v2.15.1 · 已知的"超级股票名"· DDGS 对生僻公司查询经常混入这些头部股票的结果
+# 所以对这些词做严格过滤：结果里出现就 drop（除非目标公司本身就是这些）
+_SUPERSTAR_POLLUTERS = [
+    "贵州茅台", "五粮液", "泸州老窖", "洋河股份",  # 白酒
+    "宁德时代", "比亚迪",                           # 电池
+    "中际旭创", "新易盛",                            # 光模块
+    "腾讯", "阿里巴巴", "美团", "京东",              # 互联网
+    "招商银行", "工商银行", "建设银行",              # 银行
+]
+
+
+def _result_mentions_company(result: dict, company_name: str, superstar_names: set[str]) -> bool:
+    """v2.15.1 · 判断一条 search result 是否真的跟目标公司相关.
+
+    判断标准：
+    1. title / body 里包含公司名 → ✅
+    2. 不包含公司名，但包含 superstar polluter 名（贵州茅台/五粮液等）→ ❌ 污染
+    3. 都不包含 → 视为"弱相关"，保守过滤
+    """
+    if not company_name:
+        return True  # 无法验证 · 不过滤
+    text = ((result.get("title") or "") + " " + (result.get("body") or "")).lower()
+    if not text.strip():
+        return False
+    name_lc = company_name.lower()
+    # 2 字名字过短可能误命中，取后缀 2-3 字更稳
+    name_key = name_lc[-2:] if len(name_lc) >= 2 else name_lc
+    if name_lc in text or (len(name_lc) > 2 and name_key in text):
+        return True
+    # 不含公司名但含 polluter → 污染
+    for polluter in superstar_names:
+        if polluter in text:
+            return False  # 明显污染
+    # 都不含 · 弱相关 · 保守过滤
+    return False
+
+
 def main(ticker: str) -> dict:
     ti = parse_ticker(ticker)
     basic = ds.fetch_basic(ti)
@@ -52,16 +89,20 @@ def main(ticker: str) -> dict:
         "rd": f"{stock_anchor} 研发投入 研发占比 技术实力",
     }
 
+    # v2.15.1 · 计算 superstar polluters（排除目标本身）· 防止 DDGS 对生僻公司返超级股票的结果
+    superstar_set = {p for p in _SUPERSTAR_POLLUTERS if p not in (name or "") and p not in (full_name or "")}
+
     results: dict[str, dict] = {}
     for key, q in queries.items():
         # v2.7.3 · 护城河查询用 14_moat 权威域（每经/一财/中证网/华尔街见闻）
         # 权威域未命中时用普通 search 补位
         res_t = search_trusted(q, dim_key="14_moat", max_results=6)
         res = res_t if len(res_t) >= 3 else list(res_t) + list(search(q, max_results=6))
-        # Filter: remove errors + dictionary garbage
+        # Filter: remove errors + dictionary garbage + 公司名不匹配的污染结果（v2.15.1）
         valid = [r for r in res
                  if "error" not in r
-                 and not _is_garbage(r.get("body", "") + r.get("title", ""))]
+                 and not _is_garbage(r.get("body", "") + r.get("title", ""))
+                 and _result_mentions_company(r, name, superstar_set)]
         combined_text = " ".join(r.get("body", "") for r in valid)
         results[key] = {
             "text": combined_text,

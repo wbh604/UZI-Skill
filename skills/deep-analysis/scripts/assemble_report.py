@@ -1822,6 +1822,12 @@ def render_fund_managers(managers: list) -> str:
     managers_sorted = sorted(managers, key=_sort_key)
     cards = []
     for m in managers_sorted:
+        # v2.15.1 · lite 行（return_5y is None 或 _row_type=lite）一律不生成 fund-card · 走 compact row
+        # 之前所有 manager 都进这里再 fallback return_5y = 0 · 导致报告堆一片 0.0% 的假 card
+        is_lite = m.get("_row_type") == "lite" or m.get("return_5y") is None
+        if is_lite:
+            continue
+
         name = m.get("name", "—")
         fund_name = m.get("fund_name", "—")
         avatar = m.get("avatar", "")
@@ -1913,18 +1919,39 @@ def render_fund_managers(managers: list) -> str:
     else:
         header = f'<div class="fund-mgr-header">✨ <strong>{len(managers)} 位公募基金经理</strong>持有本股 · 按 5 年累计收益排序 · 你可以直接"抄作业"</div>'
 
-    INITIAL_SHOW = 6
-    if len(cards) <= INITIAL_SHOW:
+    # v2.15.1 · INITIAL_SHOW 现在 = full_count 天然（我们已 skip lite 行）· 所有 lite 都进 compact rows
+    # 理由：之前 fixed=6 会把排序第 5/6 位的 lite 行当 full card 渲染 → 一堆 0.0% 假 card
+    INITIAL_SHOW = min(6, len(cards))
+    lite_managers = [m for m in managers_sorted if m.get("_row_type") == "lite" or m.get("return_5y") is None]
+
+    # v2.15.1 · lite 行按 fund_code 去重 + 按 position_pct 倒序 + cap top 30
+    # 避免 722 条重复份额（如 富国天惠 A/B/C/D 同时列 10+ 次）撑爆报告
+    seen = set()
+    deduped = []
+    for m in sorted(lite_managers, key=lambda x: -(x.get("position_pct") or 0)):
+        code = m.get("fund_code")
+        if code in seen:
+            continue
+        seen.add(code)
+        deduped.append(m)
+    LITE_CAP = 30
+    lite_capped = deduped[:LITE_CAP]
+    lite_overflow = max(0, len(deduped) - LITE_CAP)
+
+    # 无 lite · 全部 full 直接返（经典小股情况）
+    if not lite_managers:
         return header + f'<div class="fund-mgr-grid">{"".join(cards)}</div>'
 
-    # v2.4 · Top 6 用完整卡片；第 7 位起切换到紧凑行（头像+名字+5Y 收益+同类排名）
-    # 理由：热门股有 100+ 基金持有，全用大卡会把报告撑爆
+    # 有 lite · cards 全显示（最多 6 张大卡）+ top 30 lite 进 compact rows
     visible = "".join(cards[:INITIAL_SHOW])
     compact_rows = [
-        _render_fund_compact_row(m, rank=i + 1 + INITIAL_SHOW)
-        for i, m in enumerate(managers_sorted[INITIAL_SHOW:])
+        _render_fund_compact_row(m, rank=i + 1 + len(cards))
+        for i, m in enumerate(lite_capped)
     ]
-    hidden_count = len(cards) - INITIAL_SHOW
+    if lite_overflow > 0:
+        hidden_count = f"{len(lite_capped)}（另有 {lite_overflow} 家 · 点基金链接自行查）"
+    else:
+        hidden_count = str(len(lite_capped))
     uid = f"fm_{abs(hash(str(len(cards))))}"
 
     return header + f'''

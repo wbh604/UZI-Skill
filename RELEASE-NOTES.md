@@ -1,5 +1,56 @@
 # Release Notes
 
+## v2.15.1 — 2026-04-20 (报告质量 2 bug hotfix · 实测 300470 发现)
+
+> 用户用 v2.15.0 实测 300470.SZ（中密控股）· 指出报告里 2 个长期存在的视觉/准确性 bug · 本次 hotfix。
+
+### Bug 1 · 基金持仓一堆 "0.0% 假数据" fund-card
+
+**症状**：报告里公募基金持仓区域常看到 15-30 张 fund-card · 第 5/6/7 张以后的"5 年累计 +0.0% / 年化 +0.0% / 回撤 -0.0% / 夏普 0.00"——数据明显缺失但被当实测数据渲染。
+
+**根因**：
+1. `fetch_fund_holders._build_row_full` 在 `compute_fund_stats` 返空（`fund.eastmoney.com` SSL 失败 / 新基金数据不足）时，用 `stats.get("return_5y", 0)` 写 **0**（非 None），没降级为 lite
+2. `assemble_report.render_fund_managers` 所有 manager 都被当 full card 渲染 · `INITIAL_SHOW=6` 硬编码，lite 混进前 6 张
+
+**修复**：
+- `fetch_fund_holders.py` · stats 为空时 return `_row_type="lite"` + 全部数值字段 `None`（有真实 stats 才返 full）
+- `assemble_report.py::render_fund_managers` · for 循环里 `is_lite` 跳过 full-card 生成 · `INITIAL_SHOW = min(6, len(cards))` 动态
+- **新增 lite 行去重 + cap 30**：按 `fund_code` 去重（避免富国天惠 A/B/C/D 4 个份额重复列）· 按 `position_pct` 排序取 top 30 · 余量用"另有 N 家"提示
+
+### Bug 2 · 14_moat 护城河被贵州茅台数据污染
+
+**症状**：中密控股 300470 的报告 14_moat 区 4 个字段（intangible/switching/network/scale/rd_summary）**全部显示 "贵州茅台表示，技术创新在公司发展历程中始终扮演关键角色..."**（茅台成立研究院的新闻）
+
+**根因**：`fetch_moat.py` 对生僻公司用 DDGS 搜 "专利/核心技术/品牌壁垒" → DDGS 返回 popular stocks（茅台）的文章 → 结果只做 `_is_garbage`（字典/百科）过滤，没做"结果是否真含目标公司名"的过滤。
+
+**修复**（`fetch_moat.py`）：
+- 新增 `_SUPERSTAR_POLLUTERS` 列表（15 个易污染股：茅台/五粮液/宁德/腾讯等）
+- 新增 `_result_mentions_company()` · 结果 title+body 不含目标公司名就丢
+- polluter 集合动态排除目标本身（分析茅台时茅台自己的结果正常保留）
+
+### 验证
+
+**Playwright 实测 300470.SZ 重跑**：
+- fund 区 **0 张 0.0% 假 card** → 30 个 compact row + header "722 家公募基金持有本股 · 头部 0 家有完整 5Y 业绩"
+- 14_moat 全报告 **0 茅台污染字样**（之前 4 处）
+
+### 测试
+
+`tests/test_v2_15_1_fund_lite_rendering.py` · **11 case**：
+- fund lite 降级（7 case）：`_row_type='lite'` 正确标注 / `render_fund_managers` 跳 lite / `INITIAL_SHOW` 动态 / 全 full 无 compact / 全 lite 无 card / 核心反向测 0.0% card 不出现
+- moat 污染过滤（4 case）：polluter 结果被丢 / 真含目标公司保留 / 无关结果保守过滤 / 目标本身是 polluter 自己不被误伤
+
+pytest 全量 **255 passed**（baseline 244 + 11 新 · 零回归）。
+
+### 版本
+
+- `2.15.0 → 2.15.1`（patch · 报告质量 hotfix）
+- 4 manifest 同步
+- Branch: `feature/v2.15.1-fund-lite-render`
+- Tag: `v2.15.1`
+
+---
+
 ## v2.15.0 — 2026-04-20 (YAML persona 接入 agent role-play · 取长补短 augur)
 
 > **借鉴来源**：xgzlucario/augur（18 投资者 LLM-council CLI）· 验证后发现 YAML persona

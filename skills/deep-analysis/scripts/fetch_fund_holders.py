@@ -283,6 +283,30 @@ def main(ticker: str, limit: int | None = None) -> dict:
             position_pct = float(row.get("占市值比例", 0) or row.get("占流通股比例", 0))
         except (ValueError, TypeError):
             position_pct = 0.0
+
+        # v2.15.1 · stats 为空（fund.eastmoney.com 阻断 / 数据不足）时降级为 lite · 不写 0 避免 render 出 0.0% 假 card
+        has_real_stats = bool(stats) and stats.get("return_5y") is not None
+        if not has_real_stats:
+            return {
+                "name": manager_name,
+                "fund_name": fund_name,
+                "fund_code": fund_code,
+                "avatar": MANAGER_AVATAR_MAP.get(manager_name, ""),
+                "position_pct": round(position_pct, 2),
+                "rank_in_fund": 0,
+                "holding_quarters": 1,
+                "position_trend": "持有",
+                "return_5y": None,
+                "annualized_5y": None,
+                "max_drawdown": None,
+                "sharpe": None,
+                "peer_rank_pct": None,
+                "nav_history": [],
+                "fund_url": f"https://fund.eastmoney.com/{fund_code}.html",
+                "_row_type": "lite",  # 降级
+                "_stats_note": "fund stats 不可用（网络或数据不足）",
+            }
+
         return {
             "name": manager_name,
             "fund_name": fund_name,

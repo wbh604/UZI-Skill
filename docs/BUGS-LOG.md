@@ -7,6 +7,47 @@
 
 ---
 
+## v2.15.1 (2026-04-20 · 报告质量 2 bug hotfix · 实测 300470 发现)
+
+### BUG 1 · fund-card 渲染 0.0% 假数据
+- **症状**：用户看到"每次都一大堆基金持有，看着就很不对劲" · 报告里 15-30 张 fund-card 中第 5/6 张起 5Y/年化/回撤/夏普全是 0.0%
+- **位置**：
+  - `fetch_fund_holders.py::_build_row_full` 
+  - `assemble_report.py::render_fund_managers`
+- **根因**：双层故障链
+  1. fetch_fund_holders · compute_fund_stats 返 `{}` 时用 `stats.get("return_5y", 0)` 写 0（应该 None）· fund.eastmoney.com SSL 封或新基金 NAV 不足 50 条都会触发
+  2. assemble_report · `INITIAL_SHOW = 6` 硬编码 · 所有 manager 都过 for 循环生成 fund-card · 即便 return_5y=None 也被 `m.get("return_5y") or 0` fallback 成 0
+- **修法**：
+  - fetch_fund_holders: stats 空时降级为 `_row_type="lite"` + 所有数值字段 None · 有 has_real_stats 判断
+  - assemble_report: for 循环里 `is_lite` 跳过 full-card 生成 · `INITIAL_SHOW = min(6, len(cards))` 动态 · lite 去重（按 fund_code）+ cap 30 · 余量"另有 N 家"文案
+- **回归测试**：`tests/test_v2_15_1_fund_lite_rendering.py` · 7 case
+- **未来改该区域注意事项**：
+  - 任何 fetcher 返"有字段但数值是 0"的场景都要考虑 render 端是否会误判为"实测数据"
+  - 同理 8_materials / 3_macro / 7_industry 的数值字段如果网络失败默认返 0 会误导报告
+  - `_build_row_full` 的 has_real_stats 判断必须保留 · 未来加新 stat 字段也要纳入判断
+  - lite 去重是按 `fund_code` · 富国天惠 A/B/C/D 虽是同一产品不同份额，但在报告里应合并看
+  - LITE_CAP=30 可调 · 太少看不到小仓机构 · 太多撑爆报告
+
+### BUG 2 · 14_moat 污染成贵州茅台数据
+- **症状**：中密控股 300470 报告 14_moat 四个字段（intangible/switching/network/scale/rd_summary）全部显示"贵州茅台表示，技术创新在公司发展历程中始终扮演关键角色... 成立研究院公司..."
+- **位置**：`fetch_moat.py::main` 的 search 结果过滤环节
+- **根因**：DDGS 对生僻公司（中密控股）查 "上市公司 专利 核心技术 品牌壁垒"时返回的是热门股（茅台）的高相关文章 · 原 filter 只做 `_is_garbage`（字典/百科）检测，没做"结果是否真含目标公司名"检测
+- **修法**（`fetch_moat.py`）：
+  - `_SUPERSTAR_POLLUTERS` 列表 · 15 个易污染股（茅台/五粮液/宁德/腾讯等）
+  - `_result_mentions_company()` · 结果 title+body 不含目标公司名就丢（含 polluter 更是硬 drop）
+  - polluter 集合动态排除目标自身（分析茅台时茅台自己的结果保留）
+- **回归测试**：4 case
+  - polluter 结果被丢
+  - 真含目标公司保留
+  - 无关结果保守过滤
+  - 目标本身是 polluter 时自己不被误伤
+- **未来改该区域注意事项**：
+  - 其他用 search_trusted + keyword 评分的 dim（4_peers / 7_industry / 13_policy / 17_sentiment / 18_trap）也可能有同类污染 · 后续要逐个加这个 filter
+  - `_SUPERSTAR_POLLUTERS` 名单要定期更新 · 2026 年茅台/宁德仍是顶级，但 2027+ 可能换人
+  - 不要用 DDGS 对生僻公司做基本信息抓取 · 要靠 akshare / xueqiu API
+
+---
+
 ## v2.15.0 (2026-04-20 · YAML persona 层 · 修 Rules 4 类历史立场硬伤)
 
 ### FEATURE · YAML persona 接入 agent role-play（取长补短 augur）
