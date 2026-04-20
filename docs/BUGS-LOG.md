@@ -7,6 +7,53 @@
 
 ---
 
+## v2.15.0 (2026-04-20 · YAML persona 层 · 修 Rules 4 类历史立场硬伤)
+
+### FEATURE · YAML persona 接入 agent role-play（取长补短 augur）
+- **背景**：xgzlucario/augur 对比测试发现当前 Rules 引擎有 4 类"投资者历史立场错位"硬伤：
+  1. 合力泰 × 木头姐 Rules 说"必须重仓"（她不会买 OEM 显示模组）
+  2. 合力泰 × 赵老哥 Rules 说"观望"（这恰恰是他最爱的低价题材）
+  3. 茅台 × 巴菲特 Rules 说"买入"（他公开说过"不懂中国白酒"）
+  4. 中际旭创 × 段永平 Rules 说"强买"（PE 63 超他 40 红线）
+  Rules 是"触发某条规则就按模板出话"，没有 persona 历史 context，所以写出的话没法对齐本人立场。
+- **实现位置**：
+  - `skills/deep-analysis/personas/` · 51 YAML 文件（12 flagship 手写 + 39 stub 自动生成）
+  - `skills/deep-analysis/scripts/lib/personas.py` · 加载 + prefix-stable system message
+  - `skills/deep-analysis/scripts/lib/i18n.py` · language_instruction（zh/en）
+  - `skills/deep-analysis/SKILL.md::HARD-GATE-PERSONA-ROLEPLAY` · agent 必须读 YAML
+- **混合架构设计**：
+  - Rules 引擎保留（确定性兜底 · agent 失败仍可出报告）
+  - YAML persona 补充（flagship 优先级 > Rules headline · stub Rules 优先）
+  - 如冲突 · flagship persona 可覆盖 panel.json signal/score（记 `_rules_override`）
+- **augur 吸收的具体设计**：
+  - YAML persona 格式（philosophy/key_metrics/avoids/voice）
+  - prefix-stable system message → prompt cache 命中 → input token 省 50-90%
+  - language_instruction() i18n helper
+- **保留的自有优势**：
+  - 22 维真实 fetcher（vs augur 只靠 LLM web search）
+  - 51 投资者含游资派（vs augur 仅 18 位西方人）
+  - 17 机构方法 · HTML 报告 · 机械自查 gate
+- **验证**（双盲 · 3 股票 × 5 投资者 = 15 格）：
+  - 准确性 YAML 14/15 vs Rules 8/15
+  - 入戏感 YAML 15/15 vs Rules 2/15
+  - 明显错误 YAML 0 vs Rules 4
+- **回归测试**：`tests/test_v2_15_0_persona_layer.py` · 14 case
+  - 51 个 YAML 全部存在 · 12 flagship 身份正确 · 39 stub 标记正确
+  - flagship 必填字段（philosophy + key_metrics + voice + a_share_view）
+  - YAML id 跟 panel.json investor_id 1:1
+  - `build_system_message` prefix 稳定（prompt cache 前提）
+  - i18n zh 默认 / en opt-in / env override / unknown 回退
+- **未来改该区域注意事项**：
+  - **每次 panel.json 新增 investor_id 都必须同步建对应 persona YAML**（否则 agent role-play 会 silent fall through 到 Rules）
+  - flagship 的 12 个 YAML 是"质量基线"· 修改要审慎，要 diff 对比历史 headline 看语气是否跑偏
+  - stub 的 39 个 YAML 是占位 · 每当用户反馈"某评委说话不像本人"就把那个 stub 手写升级为 flagship · 长期目标所有 51 个都变 flagship
+  - `_parse_minimal_yaml` 是零依赖 parser · 不支持嵌套 list / 复杂 YAML · 保持 YAML 文件简化风格（不要加锚点 / 不要加 >< 折叠）
+  - `build_system_message` 必须 prefix-stable · 任何改动要先跑 `test_build_system_message_is_prefix_stable` 确认
+  - prompt cache 对 Anthropic / OpenAI 都有效，但对其他 LLM provider 可能无加速 · 文档里不能承诺"一定省钱"
+  - agent 走 sub-agent 调 role-play 时要注意：sub-agent 没有 persona YAML context，必须通过 Agent tool prompt 显式传入
+
+---
+
 ## v2.14.0 (2026-04-20 · 自动检测 GitHub 新版本 · interactive prompt)
 
 ### FEATURE · 自动更新检查

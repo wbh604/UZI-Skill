@@ -12,7 +12,7 @@
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-17-red)]()
 [![Self-Review](https://img.shields.io/badge/Self--Review-13%20checks-blueviolet)](skills/deep-analysis/scripts/lib/self_review.py)
 
-**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. v2.14.0: auto GitHub update check (y/s/n prompt) · v2.13.7: 16 news / futures / market-data sources wired · mechanical self-review gate (13 checks).**
+**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. v2.15.0: YAML persona layer (12 flagship + 39 stub · fixes 4 historical-stance bugs in Rules engine) · v2.14.0: auto GitHub update check · mechanical self-review gate (13 checks).**
 
 [Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-51-investor-jury) · [Methods](#-17-institutional-methods) · [Self-Review Gate 🆕](#-mechanical-self-review-gate-new-in-v29) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq)
 

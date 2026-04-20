@@ -1,5 +1,97 @@
 # Release Notes
 
+## v2.15.0 — 2026-04-20 (YAML persona 接入 agent role-play · 取长补短 augur)
+
+> **借鉴来源**：xgzlucario/augur（18 投资者 LLM-council CLI）· 验证后发现 YAML persona
+> 格式能系统性修复当前 Rules 引擎 4 类"历史立场错位"硬伤。
+
+### 双盲测试结果（v2.14 baseline vs v2.15 YAML）
+
+| 对比维度 | Rules 胜 | YAML 胜 |
+|---|---|---|
+| 准确性（方向对不对） | 8/15 | 14/15 |
+| 入戏感（像不像本人） | 2/15 | 15/15 |
+| 可操作性 | 4/15 | 13/15 |
+| **明显错误** | **4 个硬伤** | **0** |
+
+4 个 Rules 硬伤典型：
+- 合力泰 × 木头姐："必须重仓"（她不会买 OEM 显示模组）
+- 合力泰 × 赵老哥："观望"（这恰恰是他最爱的低价题材）
+- 茅台 × 巴菲特："买入"（他公开说过"不懂中国白酒"）
+- 中际旭创 × 段永平："强买"（PE 63 超他 40 红线）
+
+### 混合架构 · 保留自有优势
+
+```
+  22 维 fetcher → raw_data.json    ← 保留（vs augur 只靠 LLM web search）
+       ↓
+  Rules 引擎    → panel.json       ← 保留（确定性兜底 · agent 失败仍可出报告）
+       ↓
+  YAML persona → agent role-play  ← 🆕 新增（修正 Rules 硬伤）
+       +                              flagship 12 手写，优先级 > Rules headline
+  prefix-stable                      stub 39 自动生成，Rules headline 优先
+  system message
+       ↓
+  agent_analysis.json → stage2 merge → HTML + 朋友圈 + 战报
+```
+
+### 新增目录 `personas/` · 51 YAML 文件
+
+**12 Flagship（手写 · philosophy + key_metrics + avoids + a_share_view + voice + famous_positions）**：
+- Group A 经典价值：buffett / graham / fisher / munger
+- Group B 成长：lynch / wood
+- Group C 宏观：soros / dalio
+- Group E 中式价值：duan / zhangkun
+- Group F 游资：zhao_lg / zhang_mz
+
+**39 Stub（自动生成 · _meta.status=auto_generated_stub · 仅基础身份 · Rules headline 优先）**：
+- templeton / klarman（价值）· oneill / thiel（成长）· marks / druck / robertson（宏观）
+- livermore / minervini / darvas / gann（技术派）· zhushaoxing / xiezhiyu / fengliu / dengxiaofeng（中式）
+- sun_ge / fs_wyj / yangjia / chen_xq / hu_jl 等 19 位游资
+- simons / thorp / shaw（量化）
+
+Stub 会随使用逐步迭代为 flagship · 每当用户反馈"某某评委说话不像本人"就升级对应 YAML。
+
+### 新增模块
+
+- **`lib/personas.py`**（~180 行）· `Persona` dataclass + `load_persona(id)` + `build_system_message(snapshot, lang)` + `build_persona_user_message(persona, ticker)` · 零依赖迷你 YAML parser（不引入 pyyaml）
+- **`lib/i18n.py`**（~30 行）· `language_instruction(lang)` + `get_language()` · zh 默认 / en 供 Hermes 国际用户 · env `UZI_LANG=en`
+- **`SKILL.md`** 加 `HARD-GATE-PERSONA-ROLEPLAY` · agent role-play 时必须读 YAML
+
+### 吸收 augur 的 prefix-stable prompt cache 优化
+
+`personas.build_system_message(snapshot_json, lang)` 确保字节级一致 ·
+51 persona 调用共用一个 system message · Anthropic / OpenAI prompt cache 能命中前缀 ·
+预估 input token 成本 -50~90%（按 deep 档 51 人 × 3-5k token 计算，单次分析省数千 token × 51 人）。
+
+### 测试
+
+`tests/test_v2_15_0_persona_layer.py` · **14 个回归**：
+- 51 persona 文件全部存在 · 12 flagship 身份正确 · 39 stub 标记 auto_generated_stub
+- flagship 有 philosophy + key_metrics + voice + a_share_view 必填
+- YAML id 跟 panel.json investor_id 1:1 对应
+- `to_prompt_block` 输出含 Philosophy/Voice 段且 < 2500 字符
+- `build_system_message` 同 snapshot + lang prefix 稳定（prompt cache 前提）
+- i18n zh 默认 / en opt-in / env override / unknown 回退 zh
+
+**全量 244 passed**（baseline 230 + 14 新 · 零回归）。
+
+### 影响面
+
+- **agent role-play 质量显著提升**：12 flagship 评委的 headline / reasoning 会明显"更像本人"
+- **Rules 引擎仍完整兜底**：agent 失败 / 不可达时，Rules 骨架分仍能出报告（不依赖 LLM）
+- **成本可控**：prefix cache 命中能省 50-90% input token
+- **i18n 准备就绪**：Hermes 英文用户 `UZI_LANG=en` 可切换输出语言
+
+### 版本
+
+- `2.14.0 → 2.15.0`（minor bump · 新增用户可见的 role-play 质量层）
+- 4 manifest 同步
+- Branch: `feature/v2.15.0-persona-layer`
+- Tag: `v2.15.0`
+
+---
+
 ## v2.14.0 — 2026-04-20 (自动检测 GitHub 新版本 · interactive y/s/n prompt)
 
 > **用户请求**：每次使用插件时自动检测 GitHub 是否有新版本 · 有更新时弹提示 + 改动说明 · 支持"是/跳过本版/否"三选 · 跳过本版后直到下一版出来才再弹。

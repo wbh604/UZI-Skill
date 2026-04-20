@@ -113,6 +113,41 @@ Payload 示例（agent 看到这个就知道该走 ETF 引导流程）:
 ```
 </HARD-GATE>
 
+### ⛔ HARD-GATE-PERSONA-ROLEPLAY · 51 评委 role-play 必须读 YAML persona（v2.15）
+
+<HARD-GATE>
+从 v2.15.0 起，`skills/deep-analysis/personas/*.yaml` 有全 51 位投资者的 persona 定义——
+**12 个 flagship** 手写（巴菲特 / 芒格 / 格雷厄姆 / 费雪 / 林奇 / 木头姐 / 索罗斯 / 达里奥 /
+段永平 / 张坤 / 赵老哥 / 章盟主）· **39 个 stub** 自动生成（auto_generated_stub · 仅作基础
+身份提示，主要还是靠 Rules 引擎）。
+
+**当你进入 stage1 后的 role-play 阶段时，必须**：
+
+1. **读 `skills/deep-analysis/personas/{investor_id}.yaml`**（id 跟 panel.json 里一致，如
+   `buffett.yaml` / `zhao_lg.yaml`）
+2. 对 **flagship persona**（12 个）· YAML 优先级 > Rules headline：
+   - 每条 headline 必须引用 `key_metrics` 里的具体条目（如巴菲特说"ROE 连续 10 年 > 15%"，
+     段永平说"PE 40 红线"，林奇说"PEG < 1"，赵老哥说"封板时间 + 市值 1000 亿上限"）
+   - 每条 reasoning 必须带 `voice` 字段的风格词（巴菲特的"Mr. Market"、林奇的"tenbagger"、
+     木头姐的"Wright's Law / exponential disruption"、赵老哥的"龙头战法"）
+   - **signal 必须与 persona 历史立场对齐**：巴菲特不会对 PE 882 的股票说买入；木头姐不会
+     对白酒说"五大平台之一"；赵老哥不会对 9000 亿市值说"打板"
+3. 对 **stub persona**（39 个 · _meta.status=auto_generated_stub）· Rules 引擎输出优先：
+   - YAML 仅补充身份信息（school / group）
+   - 不要假装比 Rules 知道更多
+   - 可以按 group 风格模板补充简短 voice，但不得编造具体历史言论
+4. **prefix-stable system message**（如果走 `lib.personas.build_system_message`）：
+   - 同一 SNAPSHOT JSON 只拼一次
+   - 51 persona 调用时 system message 字节级一致（prompt cache 命中）
+
+**绝不能**：
+- ❌ 给某个投资者写他历史上不可能持的立场（林奇对 EPS 0 的股票说 PEG 可算 · 木头姐对
+  OEM 代工说"必须重仓"）—— Rules 引擎历史上有 4 个此类硬伤，v2.15 就是为修这个
+- ❌ 用千篇一律的模板话术（"基本面良好"、"值得关注"、"估值合理"）—— 每个 persona 必须有
+  自己 voice 字段里的特色语言
+- ❌ 绕过 YAML 直接编 persona 历史立场（尤其是有 flagship 档案的 12 位 · 必须读档案）
+</HARD-GATE>
+
 ### ⛔ HARD-GATE-QUALITATIVE · 6 维定性维度必须 agent 深度分析（v2.4）
 
 <HARD-GATE>

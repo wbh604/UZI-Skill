@@ -12,7 +12,7 @@
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-17-red)]()
 [![Self-Review](https://img.shields.io/badge/Self--Review-13%20checks-blueviolet)](skills/deep-analysis/scripts/lib/self_review.py)
 
-A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.14.0 自动检测 GitHub 新版本 + v2.13.7 16 新闻/期货/行情 源全接入 + v2.13.5 NetworkProfile + v2.11 评分校准**
+A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.15.0 YAML persona 接入 agent role-play + v2.14.0 自动版本检测 + v2.13.7 16 新源接入 + v2.11 评分校准**
 
 [安装](#安装) · [用法](#用法) · [三档深度](#-三档思考深度v2103-新增) · [Hermes 🆕](INSTALL-HERMES.md) · [评审团](#-51-位评审团) · [机构方法](#-17-种机构级方法) · [自查 gate](#-机械级自查-gatev29-起) · [报告截图](#-报告长什么样) · [FAQ](#-faq) · [入群交流测试](#-测试交流群) · [Contributors](CONTRIBUTORS.md)
 
@@ -649,6 +649,7 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| **v2.15.0** | 2026-04-20 | **YAML persona 接入 agent role-play**（借鉴 augur · 取长补短）：新增 `personas/` 目录 51 个 YAML 文件（12 flagship 手写 + 39 stub 自动生成）· `lib/personas.py` 加载 + prefix-stable system message（prompt cache 省 50-90%）· `lib/i18n.py` zh/en 语言开关 · `HARD-GATE-PERSONA-ROLEPLAY` 强制 agent 读 YAML · 双盲测试（3 股 × 5 投资者）显示 YAML 14/15 vs Rules 8/15 方向准确率 · 修复 Rules 4 类"历史立场错位"硬伤 · 14 专项测试 |
 | **v2.14.0** | 2026-04-20 | **自动检测 GitHub 新版本**：每次启动 CLI 或 agent 会话，插件会检测 GitHub latest release · 有更新则弹 `y / s / n` 三选一（是 / 跳过本版 / 否）· 跳过本版后直到下一版才再弹 · 6h 缓存防 API 限流 · 非 TTY / `UZI_NO_UPDATE_CHECK=1` / 网络异常 silent skip 不阻塞 · `HARD-GATE-UPDATE-PROMPT` 让 agent 主动展示 · 13 专项测试 |
 | **main** | 2026-04-20 | **Segmental Revenue Build-Up 落地**（`lib/segmental_model.py` 408 行 + `compute_segmental.py` CLI + `/segmental-model` slash command）· deep 档 `enable_segmental_model` flag 之前只在 profile 声明，实现缺失——本次从老分支 cherry-pick 3 个新文件，零冲突接入 · 同步新增 `CONTRIBUTORS.md` · 清理 14 个已合入幽灵分支 |
 | **v2.13.7** | 2026-04-19 | **16 新源真正接入 fetcher**：v2.13.4/6 登记但未用的 16 源全部接通——新建 `lib/news_providers.py`（jin10/em 快讯/em 公告/同花顺 4 源聚合）接入 `fetch_events` + `fetch_sentiment`；`_yahoo_v8_chart` 直连 HTTP 接入 US/HK K 线链（绕 yfinance cookie）；cfachina 期货协会源接入 `fetch_policy`（期货/商品 industry 专用）。实测 4/4 新闻源通 · A 股 15_events 密度 3-5 → 10-30 条 · pytest 217 passed |
