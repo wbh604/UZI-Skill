@@ -7,6 +7,31 @@
 
 ---
 
+## v2.15.2 (2026-04-21 · GitHub issue #36 + #30 hotfix)
+
+### BUG · Gemini CLI 安装报错（#36）
+- **症状**：`gemini extensions install ...` 失败 · 报 `missing "version"`
+- **位置**：`gemini-extension.json`（仓库根目录）
+- **根因**：Gemini CLI 硬校验 `version` 字段 · 我们没给
+- **修法**：加 `"version": "2.15.2"` · 并把该文件纳入 `.version-bump.json::files` · 未来 bump 会自动同步
+- **未来注意**：每次 bump version 时确认 `gemini-extension.json` 也被更新 · 否则 Gemini CLI 用户会装到过期版本
+
+### FEATURE · 网络自检增强（#30）
+- **需求**：Clash 用户偶尔代理配错 · 希望 plugin 能诊断 + 给具体修复建议
+- **位置**：`lib/network_preflight.py`
+- **实现**：
+  1. `_detect_local_proxy()` · 扫常见代理端口（7890/7891/7897/10808/1080/8888）· 检到本地代理但 env 没 HTTPS_PROXY → 给 export 建议
+  2. `diagnose_source(profile)` · 按 domestic/overseas/search 3 组独立诊断 · 每组列 affected_fetchers + multi-line fix
+  3. `NetworkProfile` 新增 `local_proxy: dict` + `diagnostics: list` 字段
+  4. `run_preflight` 写 cache 时把这两个新字段一起落盘 · agent 可读
+  5. verbose 模式输出 · Clash hint + 每组 fix 多行
+- **未来注意**：
+  - 若加新代理工具（如 Quantumult X / Surge 一键），在 `_LOCAL_PROXY_PORTS` 里加新端口
+  - `diagnose_source` 里的 `affected_fetchers` 列表要跟实际 fetcher 保持同步（加新 fetcher 时检查）
+  - cache 文件 schema 变了 · 老 cache 读回要用 `NetworkProfile.from_dict` 的容错逻辑
+
+---
+
 ## v2.15.1 (2026-04-20 · 报告质量 2 bug hotfix · 实测 300470 发现)
 
 ### BUG 1 · fund-card 渲染 0.0% 假数据

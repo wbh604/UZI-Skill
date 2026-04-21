@@ -1,6 +1,6 @@
 {
   "name": "stock-deep-analyzer",
-  "version": "2.15.1",
+  "version": "2.15.2",
   "description": "A股/港股/美股个股深度分析引擎 · 22维数据 × 51位大佬量化评委 × 17种机构级分析方法 · 杀猪盘检测 · Bloomberg风格HTML报告 | A-share / HK / US stock deep-analysis with first-class Chinese-market coverage — 22 data dims × 51-investor jury × 17 institutional methods · trap detection · Bloomberg-style HTML report",
   "author": {
     "name": "FloatFu-true",

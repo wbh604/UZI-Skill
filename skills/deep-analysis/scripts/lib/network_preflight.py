@@ -85,6 +85,9 @@ class NetworkProfile:
     severity: str = "ok"      # ok | warning | degraded | critical
     probed_at: float = 0.0    # unix timestamp
     checks: list = field(default_factory=list)  # List[dict] (asdict(DomainCheck))
+    # v2.15.2 (#30) · 更细的自检信息
+    local_proxy: dict = field(default_factory=dict)  # {has_local_proxy, detected, hint}
+    diagnostics: list = field(default_factory=list)  # [{group, status, affected_fetchers, fix}]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -127,6 +130,121 @@ def _detect_proxy() -> tuple[bool, str]:
         if v and v.lower() not in ("off", "no", "false"):
             return True, f"{var}={v}"
     return False, ""
+
+
+# v2.15.2 (#30) · 本地代理端口检测
+# Clash 默认端口 7890 · Clash Verge 7897 · V2rayN 10808 · Shadowsocks 1080
+_LOCAL_PROXY_PORTS = [
+    (7890, "Clash (HTTP)"),
+    (7891, "Clash (SOCKS)"),
+    (7897, "Clash Verge"),
+    (10808, "V2rayN"),
+    (1080, "Shadowsocks / SOCKS5 通用"),
+    (8888, "Charles / Fiddler"),
+]
+
+
+def _detect_local_proxy() -> dict:
+    """检测本机常见代理端口是否开启 · 无 env 但开了 Clash 的用户也能被侦测到.
+
+    返回 {
+        "has_local_proxy": bool,
+        "detected": [{"port": 7890, "name": "Clash"}, ...],
+        "hint": "Clash 已开但未设 HTTPS_PROXY · ...",
+    }
+    """
+    detected = []
+    for port, name in _LOCAL_PROXY_PORTS:
+        try:
+            sock = socket.create_connection(("127.0.0.1", port), timeout=0.3)
+            sock.close()
+            detected.append({"port": port, "name": name})
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            continue
+
+    has_env_proxy, _ = _detect_proxy()
+    hint = ""
+    if detected and not has_env_proxy:
+        names = ", ".join(d["name"] for d in detected)
+        hint = (
+            f"⚠ 检测到本地代理运行（{names}）但 env 未设 HTTPS_PROXY · "
+            f"脚本默认不走代理 · 若海外源不通请：\n"
+            f"   export HTTPS_PROXY=http://127.0.0.1:{detected[0]['port']} && export HTTP_PROXY=http://127.0.0.1:{detected[0]['port']}"
+        )
+    elif not detected and has_env_proxy:
+        hint = "⚠ HTTPS_PROXY 已设但本地代理端口未响应 · 代理可能没启动 · unset 后重试"
+
+    return {
+        "has_local_proxy": bool(detected),
+        "detected": detected,
+        "hint": hint,
+    }
+
+
+def diagnose_source(profile: "NetworkProfile") -> list[dict]:
+    """v2.15.2 (#30) · 按数据源分组给出诊断 + 修复建议.
+
+    返回 list[{group, status, affected_fetchers, fix}] ·
+    比单一 recommendation 文本更精细 · 每组 ("domestic"/"overseas"/"search") 一条.
+    """
+    diagnostics = []
+
+    # Domestic 数据源
+    if not profile.domestic_ok:
+        diagnostics.append({
+            "group": "domestic",
+            "status": "🔴 不通",
+            "affected_fetchers": ["fetch_basic", "fetch_financials", "fetch_industry", "fetch_peers",
+                                  "fetch_events", "fetch_capital_flow", "fetch_lhb", "fetch_fund_holders"],
+            "affected_count": 8,
+            "fix": (
+                "主要问题：push2.eastmoney.com / cninfo / xueqiu 全挂 · 绝大多数 fetcher 无法工作\n"
+                "  1. 检查 VPN 是否指向国内 IP（海外 VPN 会被东财反向 GFW）\n"
+                "  2. 尝试：unset HTTPS_PROXY HTTP_PROXY ALL_PROXY\n"
+                "  3. 如用 Clash · 检查规则是否把 *.eastmoney.com / cninfo / xueqiu.com 走 direct"
+            ),
+        })
+    elif profile.domestic_count < 3:
+        diagnostics.append({
+            "group": "domestic",
+            "status": "⚠ 部分不通",
+            "affected_fetchers": ["受影响具体域名见 checks 明细"],
+            "affected_count": 3 - profile.domestic_count,
+            "fix": "多数 fetcher 仍可工作 · 查 checks 明细看具体是哪个域名不通",
+        })
+
+    # Overseas 数据源
+    if not profile.overseas_ok:
+        diagnostics.append({
+            "group": "overseas",
+            "status": "🔴 不通",
+            "affected_fetchers": ["yfinance(_kline_us_chain)", "_yahoo_v8_chart", "CoinGecko / Binance / ECB"],
+            "affected_count": 3,
+            "fix": (
+                "Yahoo / CoinGecko 等海外源挂 · 美股 / 港股 / 加密数据会降级\n"
+                "  1. 确认 VPN 能访问海外（浏览器访问 finance.yahoo.com 测试）\n"
+                "  2. 中国大陆不需要海外源就能分析 A 股 · 此项可忽略\n"
+                "  3. 若必须：开 Clash 全局模式 + export HTTPS_PROXY=http://127.0.0.1:7890"
+            ),
+        })
+
+    # Search 数据源
+    if not profile.search_ok:
+        diagnostics.append({
+            "group": "search",
+            "status": "🔴 不通",
+            "affected_fetchers": ["fetch_moat", "fetch_industry(dynamic)", "fetch_policy",
+                                  "fetch_sentiment(ddgs)", "fetch_trap_signals"],
+            "affected_count": 5,
+            "fix": (
+                "DuckDuckGo / 百度搜索 全挂 · 5 个定性维度将降级\n"
+                "  1. 百度搜索被挡：中国大陆一般能通 · 检查是否 DNS 污染\n"
+                "  2. DDGS 被挡：走 VPN 或切百度搜索作为唯一源\n"
+                "  3. 实在不通：设 UZI_SKIP_WS=1 跳过 web search 部分（报告 5 个定性维度标 gap）"
+            ),
+        })
+
+    return diagnostics
 
 
 def _build_recommendation(p: NetworkProfile) -> tuple[str, str]:
@@ -193,6 +311,9 @@ def run_preflight(verbose: bool = True, timeout: float = 3.0) -> NetworkProfile:
     if reachable_latencies:
         avg_lat = int(sum(reachable_latencies) / len(reachable_latencies))
 
+    # v2.15.2 (#30) · 本地代理端口自检
+    local_proxy_info = _detect_local_proxy()
+
     prof = NetworkProfile(
         domestic_ok=dom_ok >= 2,        # 3 个有 2 个通算 ok
         overseas_ok=ovs_ok >= 2,
@@ -205,8 +326,11 @@ def run_preflight(verbose: bool = True, timeout: float = 3.0) -> NetworkProfile:
         avg_latency_ms=avg_lat,
         probed_at=time.time(),
         checks=[asdict(r) for r in results],
+        local_proxy=local_proxy_info,
     )
     prof.recommendation, prof.severity = _build_recommendation(prof)
+    # v2.15.2 (#30) · 分组诊断 + 修复建议
+    prof.diagnostics = diagnose_source(prof)
 
     if verbose:
         total = len(results)
@@ -221,7 +345,18 @@ def run_preflight(verbose: bool = True, timeout: float = 3.0) -> NetworkProfile:
             for r in grp:
                 mark = f"✓ {r.latency_ms:4d}ms" if r.reachable else f"✗ {r.error[:35]}"
                 print(f"    {mark}  {r.domain:32} · {r.purpose}")
-        print(f"\n  {prof.recommendation}\n")
+        print(f"\n  {prof.recommendation}")
+
+        # v2.15.2 (#30) · Clash 检测 + 具体诊断
+        if local_proxy_info.get("hint"):
+            print(f"  {local_proxy_info['hint']}")
+        if prof.diagnostics:
+            print(f"\n  🔧 数据源诊断（{len(prof.diagnostics)} 组受影响）")
+            for diag in prof.diagnostics:
+                print(f"     [{diag['group']}] {diag['status']} · 影响 {diag.get('affected_count', '?')} 个 fetcher")
+                for line in diag.get("fix", "").split("\n"):
+                    print(f"       {line}")
+        print()
 
     # 写 cache 供 agent 介入时读
     try:

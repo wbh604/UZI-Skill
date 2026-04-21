@@ -1,9 +1,10 @@
 {
-  "version": "2.15.1",
+  "version": "2.15.2",
   "files": [
     ".claude-plugin/plugin.json",
     ".cursor-plugin/plugin.json",
     "package.json",
+    "gemini-extension.json",
     "hooks/hooks.json",
     "run.py"
   ],
@@ -11,6 +12,7 @@
     ".claude-plugin/plugin.json": "\"version\": \"VERSION\"",
     ".cursor-plugin/plugin.json": "\"version\": \"VERSION\"",
     "package.json": "\"version\": \"VERSION\"",
+    "gemini-extension.json": "\"version\": \"VERSION\"",
     "hooks/hooks.json": "Skills vVERSION_SHORT 已加载",
     "run.py": "Skills vVERSION_SHORT · 深度分析引擎"
   }

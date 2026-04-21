@@ -649,6 +649,7 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| **v2.15.2** | 2026-04-21 | **GitHub issue hotfix**：#36 Gemini CLI 安装报错（gemini-extension.json 加 version + 纳入 version-bump）· #30 网络自检增强（Clash 本地代理端口侦测 + 数据源分组诊断 + 多行修复建议 · 写进 `.cache/_global/network_profile.json` 供 agent 读）· 10 专项测试 |
 | **v2.15.1** | 2026-04-20 | **报告质量 2 bug hotfix**（实测 300470 发现）· Bug 1: fund-card 一堆 "5Y +0.0%" 假数据 · 修 `_build_row_full` + `render_fund_managers` 让 lite 行降级 · Bug 2: 14_moat 护城河被贵州茅台数据污染（DDGS 对生僻公司返超级股票结果）· 加 `_SUPERSTAR_POLLUTERS` 过滤 · 11 专项测试 |
 | **v2.15.0** | 2026-04-20 | **YAML persona 接入 agent role-play**（借鉴 augur · 取长补短）：新增 `personas/` 目录 51 个 YAML 文件（12 flagship 手写 + 39 stub 自动生成）· `lib/personas.py` 加载 + prefix-stable system message（prompt cache 省 50-90%）· `lib/i18n.py` zh/en 语言开关 · `HARD-GATE-PERSONA-ROLEPLAY` 强制 agent 读 YAML · 双盲测试（3 股 × 5 投资者）显示 YAML 14/15 vs Rules 8/15 方向准确率 · 修复 Rules 4 类"历史立场错位"硬伤 · 14 专项测试 |
 | **v2.14.0** | 2026-04-20 | **自动检测 GitHub 新版本**：每次启动 CLI 或 agent 会话，插件会检测 GitHub latest release · 有更新则弹 `y / s / n` 三选一（是 / 跳过本版 / 否）· 跳过本版后直到下一版才再弹 · 6h 缓存防 API 限流 · 非 TTY / `UZI_NO_UPDATE_CHECK=1` / 网络异常 silent skip 不阻塞 · `HARD-GATE-UPDATE-PROMPT` 让 agent 主动展示 · 13 专项测试 |

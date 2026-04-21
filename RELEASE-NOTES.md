@@ -1,5 +1,85 @@
 # Release Notes
 
+## v2.15.2 — 2026-04-21 (Gemini CLI 安装修复 + 网络自检增强)
+
+> **Issue 驱动** · 处理 GitHub 社区反馈：
+> - **#36** · Veitkwok 报告 Gemini CLI 安装失败
+> - **#30** · 3150214587 希望代理 / 数据源自检修复机制
+
+### Bug 1 · Gemini CLI 安装报错（#36）
+
+**症状**：`gemini extensions install https://github.com/wbh604/UZI-Skill` 失败，报 `missing "version"`。
+
+**根因**：`gemini-extension.json` 缺 `version` 字段 · Gemini CLI 硬校验。
+
+**修复**：
+- `gemini-extension.json` 加 `"version": "2.15.2"`
+- `.version-bump.json::files` 新增 `gemini-extension.json` · 未来 bump 自动同步（避免再漏）
+
+### Feature 2 · 网络自检增强（#30）
+
+**需求**：用户通过 Clash 等代理时 · 环境偶尔不稳 · 希望 plugin 能自动诊断 + 给出修复建议。
+
+**实现**（`lib/network_preflight.py`）：
+1. **本地代理端口检测**（`_detect_local_proxy`）
+   - 扫 6 个常见端口：Clash 7890/7891/7897 · V2rayN 10808 · Shadowsocks 1080 · Charles 8888
+   - 若检到本地代理但 `HTTPS_PROXY` 未设 → 提示具体 export 命令
+   - 若 `HTTPS_PROXY` 已设但代理没启 → 提示 unset
+2. **数据源分组诊断**（`diagnose_source`）
+   - 按 3 组（domestic / overseas / search）独立汇报
+   - 每组列出受影响的具体 fetcher（如 "overseas 挂 · 影响 yfinance / _yahoo_v8_chart / CoinGecko"）
+   - 每组带多行 `fix` 建议（"检查 Clash 规则 / 切全局模式 / unset 代理"）
+3. **NetworkProfile 新增字段**
+   - `local_proxy: dict` · 本地端口检测结果
+   - `diagnostics: list` · 分组诊断列表
+4. **verbose 模式输出**
+   - 旧：一行 recommendation
+   - 新：recommendation + Clash hint + 每组诊断 + 每组 fix（多行）
+5. **cache 写入** · `.cache/_global/network_profile.json` 含 `local_proxy` + `diagnostics` · agent/sub-agent 可读取
+
+### 效果
+
+```
+🌐 网络预检 (3/9 通 · 均延迟 15ms · proxy=no)
+  [国内 2/3]
+    ✓  10ms  push2.eastmoney.com ...
+    ✗ ConnectionRefusedError  stock.xueqiu.com ...
+  [境外 0/3] ...
+
+  ⚠ 检测到本地代理运行（Clash Verge）但 env 未设 HTTPS_PROXY · 脚本默认不走代理
+     export HTTPS_PROXY=http://127.0.0.1:7897 && export HTTP_PROXY=http://127.0.0.1:7897
+
+  🔧 数据源诊断（2 组受影响）
+     [overseas] 🔴 不通 · 影响 3 个 fetcher
+       主要问题：Yahoo / CoinGecko 挂 · 美股港股数据降级
+       1. 浏览器测试 finance.yahoo.com 能否访问
+       2. 开 Clash 全局模式 ...
+     [search] 🔴 不通 · 影响 5 个 fetcher
+       ...
+```
+
+### 测试
+
+`tests/test_v2_15_2_network_enhance.py` · **10 case**：
+- `gemini-extension.json` 含 version 字段
+- `.version-bump.json` 纳入 gemini manifest
+- 本地代理端口检测（含 mock Clash 场景）
+- 分组诊断 3 态（全挂 / 全通 / 部分）
+- NetworkProfile 新字段存在
+- run_preflight 写 cache 含 `diagnostics` + `local_proxy`
+
+pytest 全量 **265 passed**（255 baseline + 10 新 · 零回归）。
+
+### 版本
+
+- `2.15.1 → 2.15.2`（patch · issue hotfix + 网络 UX 增强）
+- **5 manifest 同步**（新增 gemini-extension.json）
+- Branch: `feature/v2.15.2-gemini-network-fix`
+- Tag: `v2.15.2`
+- Close GitHub issues: **#36 · #30**
+
+---
+
 ## v2.15.1 — 2026-04-20 (报告质量 2 bug hotfix · 实测 300470 发现)
 
 > 用户用 v2.15.0 实测 300470.SZ（中密控股）· 指出报告里 2 个长期存在的视觉/准确性 bug · 本次 hotfix。
