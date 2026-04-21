@@ -8,12 +8,15 @@
   • 限售股解禁时间表
   • 主力资金流入流出
 全部已实现。
+
+v2.15.3 (#30) · 大宗交易 + 解禁数据走 ds.cached module-level · 避免每只股重抓全 A 数据（原每次 3+min，改后首次 3min 后续 < 1s）.
 """
 import json
 import sys
 
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
+from lib.cache import cached  # v2.15.3 · TTL cache
 from lib.market_router import parse_ticker
 
 
@@ -22,6 +25,63 @@ def _safe(fn, default):
         return fn()
     except Exception as e:
         return {"error": str(e)} if isinstance(default, dict) else default
+
+
+# v2.15.3 · 大宗/解禁数据按年缓存（TTL 24h · 数据日频更新）
+# 不缓存会每只股花 3+min 重拉 · 严重性能 bug
+_UNIVERSE_TTL = 24 * 3600  # 24h
+
+
+def _universe_dzjy(year: int = 2026) -> list:
+    """v2.15.3 · 大宗交易整年数据 · module-level cache · 全 A 共享."""
+    def _fetch():
+        try:
+            df = ak.stock_dzjy_mrtj(
+                start_date=f"{year}0101",
+                end_date=f"{year}1231",
+            )
+            return df.to_dict("records") if df is not None and not df.empty else []
+        except Exception:
+            return []
+    return cached("_universe", f"dzjy_{year}", _fetch, ttl=_UNIVERSE_TTL) or []
+
+
+def _universe_release_summary() -> list:
+    """v2.15.3 · 近一年解禁 summary · module-level cache."""
+    def _fetch():
+        try:
+            df = ak.stock_restricted_release_summary_em(symbol="近一年")
+            return df.to_dict("records") if df is not None and not df.empty else []
+        except Exception:
+            return []
+    return cached("_universe", "release_summary_1y", _fetch, ttl=_UNIVERSE_TTL) or []
+
+
+def _universe_release_detail(year: int = 2026) -> list:
+    """v2.15.3 · 解禁日历（年度） · module-level cache."""
+    def _fetch():
+        try:
+            df = ak.stock_restricted_release_detail_em(
+                start_date=f"{year}0101", end_date=f"{year}1231",
+            )
+            return df.to_dict("records") if df is not None and not df.empty else []
+        except Exception:
+            return []
+    return cached("_universe", f"release_detail_{year}", _fetch, ttl=_UNIVERSE_TTL) or []
+
+
+def _universe_margin_detail(exchange: str) -> list:
+    """v2.15.3 · 某交易所最新一天融资明细 · module-level cache · 全 A 共享."""
+    def _fetch():
+        try:
+            if exchange == "SZ":
+                df = ak.stock_margin_detail_szse(date=None)
+            else:
+                df = ak.stock_margin_detail_sse(date=None)
+            return df.to_dict("records") if df is not None and not df.empty else []
+        except Exception:
+            return []
+    return cached("_universe", f"margin_detail_{exchange}", _fetch, ttl=_UNIVERSE_TTL) or []
 
 
 def main(ticker: str) -> dict:
@@ -69,11 +129,11 @@ def main(ticker: str) -> dict:
 
     north = ds.fetch_northbound(ti)
 
-    margin = _safe(
-        lambda: ak.stock_margin_detail_szse(date=None).head(5).to_dict("records") if ti.full.endswith("SZ")
-        else ak.stock_margin_detail_sse(date=None).head(5).to_dict("records"),
-        [],
-    )
+    # v2.15.3 · 融资明细走 universe cache · 按 exchange 缓存全市场最新一天
+    exchange = "SZ" if ti.full.endswith("SZ") else "SSE"
+    universe_margin = _universe_margin_detail(exchange)
+    # head(5) 保留原行为（展示市场层 top 5 · 非本股过滤）
+    margin = universe_margin[:5] if universe_margin else []
 
     holders = _safe(
         lambda: ak.stock_zh_a_gdhs(symbol=ti.code).head(8).to_dict("records"),
@@ -85,29 +145,26 @@ def main(ticker: str) -> dict:
         [],
     )
 
-    # 大宗交易
-    block_trades = _safe(
-        lambda: ak.stock_dzjy_mrtj(start_date="20260101", end_date="20261231").pipe(
-            lambda df: df[df["证券代码"] == ti.code].head(20).to_dict("records")
-        ),
-        [],
-    )
+    # 大宗交易 · v2.15.3 · 走 universe cache · 只 filter 本股（原每次 3+min 重抓全 A）
+    try:
+        universe_dzjy = _universe_dzjy(2026)
+        block_trades = [r for r in universe_dzjy if r.get("证券代码") == ti.code][:20]
+    except Exception:
+        block_trades = []
 
-    # 限售股解禁 (近一年)
-    unlock = _safe(
-        lambda: ak.stock_restricted_release_summary_em(symbol="近一年").pipe(
-            lambda df: df[df["代码"] == ti.code].to_dict("records")
-        ),
-        [],
-    )
+    # 限售股解禁 (近一年) · v2.15.3 · universe cache
+    try:
+        universe_release = _universe_release_summary()
+        unlock = [r for r in universe_release if r.get("代码") == ti.code]
+    except Exception:
+        unlock = []
 
-    # 解禁日历前瞻 12 个月
-    unlock_future = _safe(
-        lambda: ak.stock_restricted_release_detail_em(start_date="20260101", end_date="20261231").pipe(
-            lambda df: df[df["代码"] == ti.code].head(20).to_dict("records")
-        ),
-        [],
-    )
+    # 解禁日历前瞻 12 个月 · v2.15.3 · universe cache
+    try:
+        universe_detail = _universe_release_detail(2026)
+        unlock_future = [r for r in universe_detail if r.get("代码") == ti.code][:20]
+    except Exception:
+        unlock_future = []
 
     # Normalize unlock_schedule for viz
     def _month_label(d):

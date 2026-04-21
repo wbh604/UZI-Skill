@@ -1,5 +1,70 @@
 # Release Notes
 
+## v2.15.3 — 2026-04-21 (fetch_capital_flow 严重性能 bug hotfix)
+
+> **用户反馈**："数据源这一块还是很不稳定，请你检查好" · 审计发现最严重的 bug 在 fetch_capital_flow.
+
+### Bug · 每股分析都重抓全 A 大宗/解禁/融资数据集（3+ min/股）
+
+**症状**：分析一只股票时 12_capital_flow 维度卡 3-5 min · 多股批量几小时完不了.
+
+**根因**：`fetch_capital_flow.py::main()` 里这 4 个调用对每只股票都会**重抓全市场数据集**后再 filter：
+```python
+ak.stock_dzjy_mrtj(start_date="20260101", end_date="20261231")      # 全年大宗交易 · ~3900 条
+ak.stock_restricted_release_summary_em(symbol="近一年")              # 近一年解禁 summary
+ak.stock_restricted_release_detail_em(start_date=..., end_date=...) # 全年解禁日历 · ~1600 条
+ak.stock_margin_detail_szse(date=None)                               # 最新一天深市融资明细
+```
+这些数据**全市场共享**但没做 universe-level cache · 每股都重下一遍 · 严重浪费带宽 + 时间.
+
+**修法**（`fetch_capital_flow.py`）：
+- 新增 4 个 `_universe_*()` helper · 用 `cached("_universe", key, ..., ttl=24h)` 做 module-level cache
+- 首次调用全 A 数据 · 所有股票共享 · 24h TTL
+- `main()` 里从 universe 数据 filter 出本股记录（O(n) → O(1) 之后）
+
+### 实测效果（002217 · 合力泰）
+
+| 调用 | 未 cache | cache 命中 |
+|---|---|---|
+| `_universe_dzjy` (3896 条大宗) | ~100s | **0.01s** |
+| `_universe_release_detail` (1647 条解禁) | ~100s | **0.00s** |
+| `_universe_release_summary` | ~30s | **0.00s** |
+| `_universe_margin_detail` (SZ) | ~30s | **0.00s** |
+
+**首次**：382s（下载全 A 数据建 cache）
+**二次**：cache 100% 命中 · universe 部分 **0.01s 总耗时** · 整体加速 **100+ 倍**
+
+（二次跑整体仍有延迟是因为 `fetch_northbound` / `stock_zh_a_gdhs` / `stock_individual_fund_flow` 等 per-stock 接口走 push2 · 网络层 SSL 偶尔慢 · 不是 universe 数据问题）
+
+### 稳定性审计总体结论
+
+用户反馈后做了全面审计（002217 cache 逐维体检）：
+- **健康 18 / 薄弱 5 / 崩坏 0** · 78% 稳定率
+- 5 个薄弱 dim 真实根因分类：
+  - 🔴 `12_capital_flow` · **性能 bug** · ✅ 本版修
+  - 🟡 `16_lhb` · 小盘股近期真的没上龙虎榜 · API 返空是对的
+  - 🟡 `19_contests` · xueqiu SSL 偶尔挂 · 已有 fallback
+  - 🟡 `6_research` · 小盘股券商覆盖少 · consensus_eps 真空是正常
+  - 🟡 `11_governance` · 部分股无股东大会披露 · 真实数据特性
+
+### 测试
+
+`tests/test_v2_15_3_capital_flow_cache.py` · **6 case**：
+- `_universe_*()` helper 存在性 · 用 `"_universe"` 作 cache ticker key
+- cache 命中时 < 0.1s · 不再调 akshare
+- `main()` 里不允许直调 `stock_dzjy_mrtj` / `stock_restricted_release_*` / `stock_margin_detail_*`（必须走 universe）
+
+pytest 全量 **271 passed**（265 baseline + 6 新 · 零回归）。
+
+### 版本
+
+- `2.15.2 → 2.15.3`（patch · 性能 hotfix）
+- 5 manifest 同步
+- Branch: `feature/v2.15.3-capital-flow-cache`
+- Tag: `v2.15.3`
+
+---
+
 ## v2.15.2 — 2026-04-21 (Gemini CLI 安装修复 + 网络自检增强)
 
 > **Issue 驱动** · 处理 GitHub 社区反馈：

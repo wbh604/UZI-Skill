@@ -7,6 +7,26 @@
 
 ---
 
+## v2.15.3 (2026-04-21 · fetch_capital_flow 严重性能 bug)
+
+### BUG · 每股重抓全 A 大宗/解禁/融资数据（3+ min/股）
+- **症状**：用户"数据源不稳定"反馈 · 12_capital_flow 维度每股卡 3-5 min
+- **位置**：`fetch_capital_flow.py::main()` · 4 个调用涉及全市场数据
+- **根因**：`stock_dzjy_mrtj` / `stock_restricted_release_summary_em` / `stock_restricted_release_detail_em` / `stock_margin_detail_szse/sse` 都返回全市场整年数据（几千到几万行），原 main 每股分析都重下一遍后再 filter
+- **修法**：
+  - 新增 4 个 `_universe_*()` helper · 用 `cached("_universe", key, ttl=24h)` 做 module-level cache
+  - `main()` 里从已 cache 的 universe 数据 filter 本股记录
+  - cache key 用 `"_universe"` 作 ticker · 跨股共享
+- **实测**：首次 382s（正常 · 建 cache）· 二次 cache 命中 universe 部分 0.01s
+- **回归测试**：`tests/test_v2_15_3_capital_flow_cache.py` · 6 case
+- **未来注意事项**：
+  - 所有"全市场数据集 + 本股 filter" 模式都要走 universe cache · 不能 per-stock 重抓
+  - 其他可能有同类问题的 fetcher：fetch_industry.py 的 cninfo 全行业数据 · 应审查
+  - universe cache 统一放 `.cache/_universe/api_cache/` · 跟股票 cache 分开便于清理
+  - TTL 24h · 如果是交易时间敏感的大宗/融资 · 可以缩短到 2h（但性能 vs 新鲜度要权衡）
+
+---
+
 ## v2.15.2 (2026-04-21 · GitHub issue #36 + #30 hotfix)
 
 ### BUG · Gemini CLI 安装报错（#36）
