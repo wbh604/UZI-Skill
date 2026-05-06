@@ -1,0 +1,45 @@
+name: Sync upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 */6 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream
+        run: |
+          git remote remove upstream || true
+          git remote add upstream https://github.com/wbh604/UZI-Skill.git
+          git fetch upstream --prune
+
+      - name: Sync main from upstream/main while preserving this workflow
+        run: |
+          tmpfile=$(mktemp)
+          cp .github/workflows/sync-upstream.yml "$tmpfile"
+          git checkout main
+          git reset --hard upstream/main
+          mkdir -p .github/workflows
+          cp "$tmpfile" .github/workflows/sync-upstream.yml
+          if git diff --quiet -- .github/workflows/sync-upstream.yml && [ -z "$(git status --porcelain)" ]; then
+            echo "Already up to date."
+            exit 0
+          fi
+          git add .github/workflows/sync-upstream.yml
+          git commit -m "ci: sync main from upstream"
+          git push --force-with-lease origin main
