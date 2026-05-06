@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from lib.report.svg_primitives import (
     COLOR_BULL, COLOR_BEAR, COLOR_GOLD, COLOR_CYAN, COLOR_MUTED,
-    svg_gauge, svg_progress_row,
+    svg_gauge, svg_progress_row, svg_radar,
     svg_sparkline,  # v3.3.2 · issue #50 修复 · institutional 块用了但 v3.2 拆分时漏 import
 )
 from lib.report.dim_viz import _score_class
