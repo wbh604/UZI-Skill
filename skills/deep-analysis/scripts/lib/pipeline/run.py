@@ -35,8 +35,18 @@ def run_pipeline(ticker: str, resume: bool = True) -> str:
     raw_dict = pipeline_collect(ticker, raw_previous=raw_previous, max_workers=6)
 
     # 组装 legacy 兼容 raw_data.json（dimensions + 顶层溢出字段）
+    # v3.7.2 hotfix: 必须保留顶层 market/code/full。否则 US/HK 标的在 self_review/stock_features
+    # 里会因 raw.get("market", "A") 被误判为 A 股，导致雪球/东财/A股龙虎榜等兜底路径乱跑，
+    # 最终出现 NOK 这类 ADR 被当 A 股检查的假缺口。
+    from lib.market_router import parse_ticker as _parse_ticker
+    _ti = _parse_ticker(ticker)
+    _basic = raw_dict.get("0_basic") or {}
+    _basic_market = _basic.get("market") if isinstance(_basic, dict) else None
     raw_data_compatible = {
         "ticker": ticker,
+        "market": _basic_market if _basic_market in ("A", "H", "U") else _ti.market,
+        "code": _ti.code,
+        "full": _ti.full,
         "dimensions": {k: v for k, v in raw_dict.items()
                        if k not in ("fund_managers", "similar_stocks")},
     }
@@ -104,6 +114,6 @@ def _write_cache(ticker: str, raw: dict) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / "raw_data.json"
     try:
-        cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     except Exception as e:
         print(f"   ⚠️ 写 cache 失败: {e}")
