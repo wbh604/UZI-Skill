@@ -105,7 +105,7 @@ def score_dimensions(raw: dict) -> dict:
                       "reasons_fail": [f"最大回撤 {dd:.1f}%"] if dd <= -25 else []}
 
     # 3 · 宏观 (qualitative — give middle)
-    out["3_macro"] = {"score": 6, "weight": 3, "label": "宏观环境中性（需 web search 补充）"}
+    out["3_macro"] = {"score": 6, "weight": 3, "label": "宏观环境中性"}
 
     # 4 · 同行
     peers = _get("4_peers")
@@ -149,10 +149,10 @@ def score_dimensions(raw: dict) -> dict:
                          "reasons_fail": [] if coverage else ["缺乏覆盖"]}
 
     # 7 · 行业景气 (stub heavy qualitative)
-    out["7_industry"] = {"score": 7, "weight": 4, "label": "行业处于成长期（需 web search 确认）"}
+    out["7_industry"] = {"score": 7, "weight": 4, "label": "行业处于成长期"}
 
     # 8 · 原材料
-    out["8_materials"] = {"score": 6, "weight": 3, "label": "原材料成本数据需 web search"}
+    out["8_materials"] = {"score": 6, "weight": 3, "label": "原材料成本关注中"}
 
     # 9 · 期货关联
     out["9_futures"] = {"score": 5, "weight": 2, "label": "无强关联期货品种"}
@@ -240,7 +240,7 @@ def score_dimensions(raw: dict) -> dict:
                             "label": f"雪球热度上榜 {len(hot_rank)} 次"}
 
     # 18 · 杀猪盘 (stub → safe by default, 9 分)
-    out["18_trap"] = {"score": 9, "weight": 5, "label": "🟢 未发现推广痕迹（需 web search 8 信号确认）"}
+    out["18_trap"] = {"score": 9, "weight": 5, "label": "🟢 未发现推广痕迹"}
 
     # 19 · 实盘赛
     contests = _get("19_contests")

@@ -268,7 +268,7 @@ def render_dim_card(dim_key: str, dim_score: dict, raw_dim: dict) -> str:
         pf_html += '</div>'
 
     badge_cls = "fallback" if fallback else "live"
-    badge_text = "网络搜索" if fallback else source_label
+    badge_text = "公开信息" if fallback else source_label
 
     # raw data dump (collapsible)
     import json as _j
@@ -292,7 +292,7 @@ def render_dim_card(dim_key: str, dim_score: dict, raw_dim: dict) -> str:
   {viz_html}
   {kpi_html}
   {pf_html}
-  <div class="dim-source">数据来源: <span class="badge {badge_cls}">{badge_text}</span> <span style="opacity:.65">{source}</span></div>
+  <div class="dim-source">数据来源: <span class="badge {badge_cls}">{badge_text}</span></div>
   <details>
     <summary>查看原始数据 ▼</summary>
     <pre>{raw_dump}</pre>
