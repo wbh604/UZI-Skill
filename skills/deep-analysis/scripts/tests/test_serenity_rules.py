@@ -143,11 +143,12 @@ def test_school_lock_I_only_serenity():
 
 def test_embodied_ai_harmonic_reducer_bullish():
     """issue #72 · 绿的谐波(谐波减速器) 是具身智能卡脖子点 · Serenity 本人推过 ·
-    小盘 + 高切换成本 → 必须 bullish · 不能再判 0。"""
+    小盘 + 高切换成本 + 量产/定点硬证据 → 必须 bullish · 不能再判 0。
+    v3.8.0: 真实的绿的谐波有量产/定点(公开)→ 证据 strong → 卡位分高。"""
     from lib.investor_evaluator import evaluate
     f = _features("绿的谐波", "谐波减速器/工业机器人零部件", 250,
-                  "人形机器人核心部件 谐波减速器 国产替代 特斯拉 Optimus 供应链",
-                  switching=9, scale=8, growth="40%")
+                  "人形机器人核心部件 谐波减速器 国产替代 特斯拉定点 量产交付 供应链",
+                  switching=9, scale=8, growth="40%", events=["大订单", "量产"])
     assert f["ai_chain_hit"] is True, "谐波减速器/人形机器人必须命中 AI 链(具身智能)"
     assert f["ai_chokepoint_score"] >= 70, f"卡位分应 ≥70，实际 {f['ai_chokepoint_score']}"
     r = evaluate("serenity", f)

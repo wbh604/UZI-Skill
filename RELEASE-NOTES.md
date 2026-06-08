@@ -1,5 +1,44 @@
 # Release Notes
 
+## v3.8.0 — 2026-06-08 (Tier-1 5 方法 + Serenity 严谨化 + 技术指标/杜邦扩展)
+
+### ✨ Feature · 从 `anthropics/financial-services` 续引入 5 个与个股研究强相关的方法
+
+继 v2.0.0 首批引入 17 种机构方法后，本次对照上游仓库做差距分析，引入 Tier-1 的 5 个新方法（全部适配 A 股/港股/美股，纯函数 + `methodology_log`，放在新包 `lib/tier1/`）。卖方 IB（CIM/teaser/buyer-list）、基金后台（fund-admin/月结/GL 对账）、合规（KYC）等超出散户个股定位的内容**有意不引入**。
+
+| 命令 | 方法 | 说明 |
+|---|---|---|
+| `/ai-readiness` | `build_ai_readiness` | 单票 **AI 就绪度/卡位评估** — 复用 Serenity 的 `ai_chokepoint_score`，3 道 gate（在链/真实需求/不可替代）→ Go/Wait + AI 杠杆点 + 评级（强/中/弱/无） |
+| `/earnings-preview` | `build_earnings_preview` | **财报前**预览 — 一致预期 + 按行业的关注指标 + Bull/Base/Bear 情景 + 催化清单 + 隐含波动（补 `/earnings` 的财报后解读） |
+| `/model-update` | `build_model_update` | 新财报/指引**增量更新模型** — 假设 before→after delta + 对 DCF 内在价值/Comps 隐含价/thesis 支柱的影响 + 更新后 verdict |
+| `/returns` | `build_returns_attribution` | 二级市场组合**收益归因** — 按持仓/行业拆解总收益 + Top 贡献/拖累（配 `--portfolio`） |
+| `/rebalance` | `build_rebalance` | 逐持仓**再平衡** — 漂移 + 交易清单 + **本地化换手成本**（A 股印花税 0.05%/佣金、港股 0.1%、美股≈0）；A 股个人无资本利得税故**不做 TLH** |
+
+**实测**：用真实数据（水晶光电 002273）跑 `build_ai_readiness` → 评级「中」/卡位 70/Wait，与 Serenity 对该票的 neutral 判定一致。
+
+**改动**：新增 `lib/tier1/`（5 模块 + `__init__.py`）、5 个 `commands/*.md`、5 个 `references/fin-methods/*.md`、5 个测试文件（46 个新用例）。`fin-methods/README.md` 登记 Tier-1 表。未改动既有方法与评委体系。`/rebalance`（逐持仓+换手成本）与既有 `build_portfolio_rebalance`（资产大类配置）分工互补。
+
+46 个新回归测试 · 总 **579 passed**。
+
+### ✨ Feature · 参考三个社区仓库优化 Serenity + 数据/指标（参考 `lolifamily/ashare-mcp` · `ZhuLinsen/daily_stock_analysis` · `muxuuu/serenity-skill`）
+
+对照三个外部仓库做差距分析，落地 5 项改进：
+
+**Serenity 角色严谨化（参考 `muxuuu/serenity-skill`）—— 不再"只会看多"：**
+1. **8 罚分因子** `ai_penalties`：炒作无订单 / 微盘流动性 / 杀猪盘 / 治理质押 / 周期性 / 替代设计 / 地缘(无国产替代) / 稀释 → 卡位再硬踩雷也减分（封顶 60% 折扣），呼应 dossier 的"拉高出货嫌疑"
+2. **证据阶梯（3 级）** `ai_evidence_grade`：强(公告/财报/定点/量产/认证/专利)×1.0 > 中(权威媒体/卖方)×0.85 > 弱(KOL/论坛/纯叙事)×0.70。**每标的需 ≥1 强/中证据**否则打七折 —— 同一卡位点"有定点/量产"≈90 分 vs"仅题材"≈60 分
+3. **供应链 8 层分层** `ai_chain_tier`：材料(1.0)>制程封装>设备测试>芯片器件>基建>模块>系统集成>下游需求(0.4)，越上游瓶颈分越高
+
+**数据/指标扩展（参考 `ashare-mcp` 指标广度）：**
+4. **DuPont 杜邦分解**：ROE = 净利率 × 总资产周转 × 权益乘数 + `roe_quality`(margin_driven/leverage_driven/balanced) → 价值派(巴菲特/张磊)看 ROE 质量来源
+5. **KDJ / OBV / Williams%R**：从 kline 本地计算 → 给 D 技术派评委加料 · 报告 K 线卡片新增副指标徽章
+
+> `daily_stock_analysis` 的多渠道推送 / X 社交情绪暂未引入（产品形态不同 / 需 API auth），留作后续。
+
+15 个新回归测试（Serenity 罚分·证据·分层 + DuPont + KDJ/OBV/Williams）· 总 **622 passed**。
+
+---
+
 ## v3.7.1 — 2026-06-04 (README 首页补 Serenity 介绍 + `--school H/I` 放开)
 
 ### 🐛 用户反馈 · README 没把 Serenity 写清楚

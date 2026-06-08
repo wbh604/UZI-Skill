@@ -1,7 +1,7 @@
 ---
 name: deep-analysis
 description: 个股深度分析的核心工作流。当用户要求"深度分析 / 全面分析 / 帮我看看 / 值不值得买 / DCF / 机构建模 / 首次覆盖 / 投委会备忘录"等涉及个股研究的请求时触发。覆盖 A 股、港股、美股，产出 22 维数据 + 52 位大佬量化评审 + 6 种机构级估值建模 (DCF/Comps/LBO/3-Stmt/Merger) + 7 种研究产物 (首次覆盖/财报解读/催化剂日历/投资逻辑追踪/晨报/量化筛选/行业综述) + 6 种决策方法 (IC Memo/DD/Porter/单位经济/VCP/再平衡) + 杀猪盘检测，最终生成 Bloomberg 风格 HTML 报告 + 社交分享战报。关键词：股票、个股、深度分析、估值、DCF、comps、首次覆盖、IC memo、杀猪盘、龙虎榜、akshare。
-version: 3.7.1
+version: 3.8.0
 author: FloatFu-true
 license: MIT
 metadata:

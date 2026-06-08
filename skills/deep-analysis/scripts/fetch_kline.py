@@ -45,6 +45,51 @@ def _rsi(closes, n=14):
     return 100 - 100 / (1 + rs)
 
 
+# v3.8.0 · KDJ / OBV / Williams%R (参考 ashare-mcp 指标广度 · 给 D 技术派评委加料)
+def _kdj(closes, highs, lows, n=9):
+    """随机指标 KDJ · 返回 (K, D, J) 末值 · 数据不足返 (None,None,None)."""
+    if len(closes) < n:
+        return None, None, None
+    k, d = 50.0, 50.0
+    for i in range(n - 1, len(closes)):
+        hh = max(highs[i - n + 1:i + 1])
+        ll = min(lows[i - n + 1:i + 1])
+        rsv = (closes[i] - ll) / (hh - ll) * 100 if hh > ll else 50.0
+        k = 2 / 3 * k + 1 / 3 * rsv
+        d = 2 / 3 * d + 1 / 3 * k
+    j = 3 * k - 2 * d
+    return round(k, 1), round(d, 1), round(j, 1)
+
+
+def _obv(closes, vols):
+    """能量潮 OBV · 返回 (obv_last, obv_trend_up) · 末 20 日斜率判趋势."""
+    if len(closes) < 2:
+        return None, None
+    obv = [0.0]
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i - 1]:
+            obv.append(obv[-1] + vols[i])
+        elif closes[i] < closes[i - 1]:
+            obv.append(obv[-1] - vols[i])
+        else:
+            obv.append(obv[-1])
+    trend_up = None
+    if len(obv) >= 20:
+        trend_up = obv[-1] > obv[-20]
+    return round(obv[-1], 0), trend_up
+
+
+def _williams_r(closes, highs, lows, n=14):
+    """威廉指标 %R · 返回 0..-100（越接近 0 越超买 · 越接近 -100 越超卖）."""
+    if len(closes) < n:
+        return None
+    hh = max(highs[-n:])
+    ll = min(lows[-n:])
+    if hh <= ll:
+        return -50.0
+    return round((hh - closes[-1]) / (hh - ll) * -100, 1)
+
+
 def _stage(closes, ma200) -> int:
     """Weinstein Stage Analysis: 1=底部 2=上升 3=顶部 4=下降"""
     if len(closes) < 60 or ma200 is None:
@@ -111,6 +156,13 @@ def compute_indicators(klines: list[dict]) -> dict:
         "macd_dif": dif[-1], "macd_dea": dea[-1], "macd_hist": macd_hist[-1],
         "macd_golden_cross": dif[-1] > dea[-1] and dif[-2] <= dea[-2] if len(dif) > 1 else False,
         "rsi_14": _rsi(closes, 14),
+        # v3.8.0 · KDJ / OBV / Williams%R (D 技术派评委用 · 本地从 kline 计算)
+        "kdj_k": _kdj(closes, highs, lows, 9)[0],
+        "kdj_d": _kdj(closes, highs, lows, 9)[1],
+        "kdj_j": _kdj(closes, highs, lows, 9)[2],
+        "obv": _obv(closes, vols)[0],
+        "obv_trend_up": _obv(closes, vols)[1],
+        "williams_r": _williams_r(closes, highs, lows, 14),
         "year_high": max(closes[-250:]) if len(closes) >= 250 else max(closes),
         "year_low": min(closes[-250:]) if len(closes) >= 250 else min(closes),
         "pct_from_year_high": (last - max(closes[-250:])) / max(closes[-250:]) * 100 if len(closes) >= 250 else 0,

@@ -111,6 +111,32 @@ def _fetch_a_share(ti) -> dict:
                 out["roe"] = f"{_to_float(last['加权净资产收益率(%)']):.1f}%"
             if "销售净利率(%)" in df_ind.columns:
                 out["net_margin"] = f"{_to_float(last['销售净利率(%)']):.1f}%"
+
+            # v3.8.0 · DuPont 杜邦分解 · ROE = 净利率 × 总资产周转率 × 权益乘数
+            # 价值派(巴菲特/张磊)看 ROE 的"质量来源"：margin 驱动=高质量 · 纯杠杆驱动=风险
+            try:
+                _dp_nm = _to_float(last.get("销售净利率(%)")) if "销售净利率(%)" in df_ind.columns else None
+                _dp_to = _to_float(last.get("总资产周转率(次)")) if "总资产周转率(次)" in df_ind.columns else None
+                _dp_dr = _to_float(last.get("资产负债率(%)")) if "资产负债率(%)" in df_ind.columns else None
+                _dp_em = (100.0 / (100.0 - _dp_dr)) if (_dp_dr not in (None, 0) and _dp_dr < 100) else None
+                if _dp_nm is not None and _dp_to is not None and _dp_em is not None:
+                    _dp_roe = _dp_nm * _dp_to * _dp_em  # net_margin% × turnover × em → ROE%
+                    # 质量判定：净利率贡献占比 = 看 ROE 多大程度靠"赚钱能力"而非"借钱放大"
+                    _margin_lever_ratio = _dp_nm / (_dp_em * 10) if _dp_em else 0  # 经验比例
+                    out["dupont"] = {
+                        "net_margin_pct": round(_dp_nm, 2),
+                        "asset_turnover": round(_dp_to, 3),
+                        "equity_multiplier": round(_dp_em, 2),
+                        "roe_reconstructed_pct": round(_dp_roe, 2),
+                        # 质量标签：权益乘数 >2.5(高杠杆) 且净利率偏低 → leverage-driven(风险)
+                        "roe_quality": (
+                            "leverage_driven" if (_dp_em >= 2.5 and _dp_nm < 10)
+                            else "margin_driven" if _dp_nm >= 15
+                            else "balanced"
+                        ),
+                    }
+            except Exception:
+                pass
     except Exception as e:
         out["_indicator_error"] = str(e)
 

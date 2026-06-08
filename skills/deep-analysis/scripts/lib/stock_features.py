@@ -139,6 +139,15 @@ def extract_features(raw: dict, dims: dict) -> dict:
     f["roic"] = _f(health.get("roic"))
     f["fcf_positive"] = f["fcf_margin"] > 0
 
+    # v3.8.0 · DuPont 杜邦分解 · 暴露给评委/报告 (价值派看 ROE 质量来源)
+    _dupont = fin.get("dupont") or {}
+    if _dupont:
+        f["dupont_net_margin"] = _f(_dupont.get("net_margin_pct"))
+        f["dupont_asset_turnover"] = _f(_dupont.get("asset_turnover"))
+        f["dupont_equity_multiplier"] = _f(_dupont.get("equity_multiplier"))
+        f["dupont_roe"] = _f(_dupont.get("roe_reconstructed_pct"))
+        f["roe_quality"] = str(_dupont.get("roe_quality", ""))  # margin_driven/leverage_driven/balanced
+
     # Dividend
     f["consecutive_dividend_years"] = len(div_years)
     f["dividend_yield"] = _f(basic.get("dividend_yield_ttm"))
@@ -154,6 +163,18 @@ def extract_features(raw: dict, dims: dict) -> dict:
     f["rsi"] = _f(kline.get("rsi"))
     f["rsi_overbought"] = f["rsi"] > 70
     f["rsi_oversold"] = f["rsi"] < 30
+
+    # v3.8.0 · KDJ / OBV / Williams%R (D 技术派评委用 · 从 kline.indicators 取)
+    _ind = kline.get("indicators") or {}
+    f["kdj_k"] = _f(_ind.get("kdj_k"))
+    f["kdj_d"] = _f(_ind.get("kdj_d"))
+    f["kdj_j"] = _f(_ind.get("kdj_j"))
+    f["kdj_golden_cross"] = bool(_ind.get("kdj_k") and _ind.get("kdj_d") and _ind["kdj_k"] > _ind["kdj_d"])
+    f["obv_trend_up"] = bool(_ind.get("obv_trend_up"))
+    f["williams_r"] = _f(_ind.get("williams_r"))
+    # Williams%R: 0..-20 超买 · -80..-100 超卖
+    f["williams_overbought"] = f["williams_r"] > -20 if _ind.get("williams_r") is not None else False
+    f["williams_oversold"] = f["williams_r"] < -80 if _ind.get("williams_r") is not None else False
 
     stats = kline.get("kline_stats") or {}
     f["ytd_return"] = _f(stats.get("ytd_return"))
@@ -443,12 +464,96 @@ def extract_features(raw: dict, dims: dict) -> dict:
     if f.get("industry_growth", 0) >= 20:
         _inflection += 0.3
     _inflection = min(_inflection, 1.0)
-    # 合成：AI 链是门槛
+
+    # ── v3.8.0 · 供应链 8 层分层 (参考 muxuuu/serenity-skill) ──────────
+    # 越上游、越靠近物理瓶颈 → tier_weight 越高 → 卡位分加成越大。
+    # 从最上游往下扫 · 取最上游命中的层（瓶颈理论：上游卡点主导定价权）。
+    _TIER_MAP = [
+        ("材料耗材", 1.00, ["inp", "磷化铟", "砷化镓", "化合物半导体", "衬底", "外延", "晶体生长",
+                          "高纯", "abf", "载板", "封装基板", "空芯光纤", "靶材", "电子特气", "光刻胶"]),
+        ("制程/封装", 0.92, ["cowos", "先进封装", "硅光", "mbe", "键合"]),
+        ("设备/测试", 0.85, ["光刻", "刻蚀", "量测", "坩埚", "分选机", "测试机"]),
+        ("芯片/器件", 0.78, ["光芯片", "eml", "vcsel", "dfb", "激光器", "hbm", "ddr", "asic", "gpu",
+                          "risc-v", "六维力", "力传感器", "触觉传感器", "谐波减速器", "rv减速器",
+                          "精密减速器", "行星滚柱丝杠", "滚柱丝杠", "空心杯电机", "无框电机"]),
+        ("基础设施", 0.70, ["数据中心", "data center", "idc", "算力", "电网", "核电", "变压器"]),
+        ("模块/子系统", 0.62, ["光模块", "光引擎", "连接器", "电源", "bbu", "液冷", "散热",
+                            "灵巧手", "关节模组", "执行器", "减速器", "丝杠"]),
+        ("系统集成", 0.50, ["交换机", "ai server", "ai 服务器", "服务器", "机械臂", "整机"]),
+        ("下游需求", 0.40, ["人形机器人", "humanoid", "机器人", "ar 眼镜", "ar眼镜", "头显", "近眼显示"]),
+    ]
+    _tier_name, _tier_weight = "未分层", 0.55
+    for _tn, _tw, _kws in _TIER_MAP:
+        if any(k in _blob for k in _kws):
+            _tier_name, _tier_weight = _tn, _tw
+            break
+    f["ai_chain_tier"] = _tier_name
+    f["ai_chain_tier_weight"] = _tier_weight
+
+    # ── v3.8.0 · 证据阶梯 (参考 serenity-skill evidence-ladder) ────────
+    # 强(公告/财报/订单/认证/专利)=1.0 · 中(单一硬证据)=0.85 · 弱(仅叙事)=0.7
+    _HARD_EVIDENCE_KW = ["认证", "定点", "量产", "订单", "中标", "专利", "长协",
+                         "通过验证", "合格供应商", "独供", "送样", "小批量", "批量交付"]
+    _ev = 0
+    if f.get("net_margin"):                       # 有真实财报
+        _ev += 1
+    if f.get("has_positive_catalyst"):            # 公告/催化类硬信号
+        _ev += 1
+    if any(k in _blob for k in _HARD_EVIDENCE_KW):  # 订单/认证/专利等硬证据词
+        _ev += 1
+    if _ev >= 2:
+        _ev_grade, _ev_mult = "strong", 1.0
+    elif _ev == 1:
+        _ev_grade, _ev_mult = "medium", 0.85
+    else:
+        _ev_grade, _ev_mult = "weak", 0.70        # 只有叙事 → 打折 · Serenity 不盲信
+    f["ai_evidence_grade"] = _ev_grade
+
+    # ── v3.8.0 · 8 罚分因子 (参考 serenity-skill scorecard penalty side) ─
+    # Serenity 不再只会看多 · 卡位再硬 · 踩到这些雷也要减分（呼应 dossier "拉高出货嫌疑"）。
+    _pen: dict[str, float] = {}
+    _heat = _f(f.get("sentiment_heat"))
+    # 1. 炒作无订单：在链 + 高热度 + 无硬证据 → 拉高出货嫌疑
+    if f["ai_chain_hit"] and _heat >= 70 and _ev == 0:
+        _pen["hype_no_orders"] = 0.30
+    # 2. 微盘流动性：市值过小 · 出不来货
+    if 0 < _mc < 30:
+        _pen["liquidity"] = 0.20
+    elif 30 <= _mc < 50:
+        _pen["liquidity"] = 0.10
+    # 3. 会计/杀猪盘：trap 不安全
+    if not f.get("is_safe", True):
+        _pen["accounting_trap"] = 0.25
+    # 4. 治理：质押爆雷
+    if f.get("has_pledge_issue"):
+        _pen["governance"] = 0.15
+    # 5. 周期性：纯周期行业（不是真成长瓶颈）
+    if any(k in _blob for k in ["钢铁", "煤炭", "有色冶炼", "化工原料", "航运", "水泥", "养殖", "周期"]):
+        _pen["cyclicality"] = 0.15
+    # 6. 替代设计风险：技术路线之争 / 被替代
+    if any(k in _blob for k in ["技术路线之争", "被替代", "替代风险", "路线分歧", "新技术冲击", "颠覆性替代"]):
+        _pen["alt_design"] = 0.15
+    # 7. 地缘：出口管制/制裁 但没有国产替代叙事 (有国产替代反而是 thesis · 不罚)
+    if (any(k in _blob for k in ["出口管制", "制裁", "实体清单", "断供"]) and
+            not any(k in _blob for k in ["国产替代", "自主可控", "进口替代"])):
+        _pen["geopolitics"] = 0.15
+    # 8. 稀释：定增/增发/解禁等本身就是摊薄信号 (不需另有负向催化)
+    if any(k in _blob for k in ["定增", "增发", "可转债", "再融资", "配股", "解禁", "股权激励摊薄"]):
+        _pen["dilution"] = 0.15
+    _penalty_total = min(sum(_pen.values()), 0.60)  # 封顶 60% 折扣
+    f["ai_penalties"] = _pen
+    f["ai_penalty_total"] = round(_penalty_total, 2)
+
+    # ── 合成：AI 链是门槛 · 再叠 分层 × 证据 × (1-罚分) ──────────────
     if f["ai_chain_hit"]:
         _kw_strength = min(len(_ai_hit), 3) / 3.0     # 命中强度 0-1
         _irr_norm = min(_irrepl / 16.0, 1.0)          # 16/20 视作满格
-        _score = (0.35 * _kw_strength + 0.30 * _irr_norm +
-                  0.20 * _elasticity + 0.15 * _inflection) * 100
+        _base = (0.35 * _kw_strength + 0.30 * _irr_norm +
+                 0.20 * _elasticity + 0.15 * _inflection)
+        _base *= (0.70 + 0.30 * _tier_weight)         # 分层加成（上游瓶颈分高）
+        _base *= _ev_mult                             # 证据折扣
+        _base *= (1.0 - _penalty_total)               # 罚分
+        _score = _base * 100
     else:
         _score = 8.0 * _elasticity                    # 不在链上 → 接近 0
     f["ai_chokepoint_score"] = round(_score, 1)

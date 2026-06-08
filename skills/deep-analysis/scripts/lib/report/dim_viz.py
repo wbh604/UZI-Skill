@@ -254,8 +254,25 @@ def _viz_kline(raw: dict) -> str:
   <span style="padding:4px 10px;background:#fef3c7;color:#d97706;border-radius:4px;font-family:Fira Code;font-size:11px;font-weight:600">{stage}</span>
   <span style="padding:4px 10px;background:#cffafe;color:#0891b2;border-radius:4px;font-family:Fira Code;font-size:11px;font-weight:600">MA {ma_align}</span>
   <span style="padding:4px 10px;background:#d1fae5;color:#059669;border-radius:4px;font-family:Fira Code;font-size:11px;font-weight:600">MACD {macd}</span>
-  <span style="padding:4px 10px;background:#e0e7ff;color:#4f46e5;border-radius:4px;font-family:Fira Code;font-size:11px;font-weight:600">RSI {rsi}</span>
-</div>'''
+  <span style="padding:4px 10px;background:#e0e7ff;color:#4f46e5;border-radius:4px;font-family:Fira Code;font-size:11px;font-weight:600">RSI {rsi}</span>'''
+    # v3.8.0 · KDJ / OBV / Williams%R 副指标徽章 (参考 ashare-mcp 指标广度)
+    _ind = raw.get("indicators") or {}
+    _kj = _ind.get("kdj_j")
+    if _kj is not None:
+        _kc = "#dc2626" if _kj > 100 else ("#059669" if _kj < 0 else "#7c3aed")
+        badges += (f'<span style="padding:4px 10px;background:#f3e8ff;color:{_kc};border-radius:4px;'
+                   f'font-family:Fira Code;font-size:11px;font-weight:600">KDJ-J {_kj:.0f}</span>')
+    _wr = _ind.get("williams_r")
+    if _wr is not None:
+        _wc = "#dc2626" if _wr > -20 else ("#059669" if _wr < -80 else "#64748b")
+        badges += (f'<span style="padding:4px 10px;background:#f1f5f9;color:{_wc};border-radius:4px;'
+                   f'font-family:Fira Code;font-size:11px;font-weight:600">W%R {_wr:.0f}</span>')
+    if _ind.get("obv_trend_up") is not None:
+        _ot = "OBV↑" if _ind.get("obv_trend_up") else "OBV↓"
+        _oc = "#059669" if _ind.get("obv_trend_up") else "#dc2626"
+        badges += (f'<span style="padding:4px 10px;background:#ecfdf5;color:{_oc};border-radius:4px;'
+                   f'font-family:Fira Code;font-size:11px;font-weight:600">{_ot}</span>')
+    badges += '</div>'
 
     # Bonus: volatility / beta / max drawdown if available
     stats = raw.get("kline_stats", {})

@@ -81,6 +81,8 @@ DIM_META = {
     },
     "2_kline": {
         "id": "02", "title": "K 线技术面", "en": "Technical", "weight": 4, "cat": "mkt",
+        # 注：2_kline 走专属 candlestick viz (非 KPI 网格) · v3.8.0 的 KDJ/OBV/Williams
+        # 副指标徽章在 lib/report/dim_viz._viz_kline 里渲染
         "kpis": ["stage", "ma_align", "macd", "rsi"],
         "kpi_labels": {"stage": "Stage", "ma_align": "均线", "macd": "MACD", "rsi": "RSI"},
     },

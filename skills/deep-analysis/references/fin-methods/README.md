@@ -2,7 +2,7 @@
 
 > 改编自 `anthropics/financial-services-plugins`，适配 A 股 / 港股 / 美股散户深度分析场景。
 
-本目录记录 15 种机构级分析方法的**方法论**与**A 股落地参数**。每种方法都有对应的 Python 计算模块：
+本目录记录 22 种机构级分析方法的**方法论**与**A 股落地参数**（18 种核心 + 5 个 Tier-1 续引入，见文末）。每种方法都有对应的 Python 计算模块：
 
 | 方法 | Python 模块 | 源 SKILL |
 |---|---|---|
@@ -23,7 +23,22 @@
 | 单位经济 | `lib/deep_analysis_methods.py :: build_unit_economics` | private-equity/unit-economics |
 | 价值创造计划 | `lib/deep_analysis_methods.py :: build_value_creation_plan` | private-equity/value-creation-plan |
 | 尽调清单 | `lib/deep_analysis_methods.py :: build_dd_checklist` | private-equity/dd-checklist |
-| 组合再平衡 | `lib/deep_analysis_methods.py :: build_portfolio_rebalance` | wealth-management/portfolio-rebalance |
+| 组合再平衡（大类配置） | `lib/deep_analysis_methods.py :: build_portfolio_rebalance` | wealth-management/portfolio-rebalance |
+
+## Tier-1 续引入（v3.8.0 · `lib/tier1/` 包）
+
+> 2026-06-04 第二批从 `anthropics/financial-services` 续引入的 5 个与个股研究强相关的方法，
+> 各自有 slash 命令（`commands/`）+ 方法论文档（本目录）+ 纯函数模块（`lib/tier1/`）+ pytest。
+
+| 方法 | Python 模块 | 命令 | 源 SKILL |
+|---|---|---|---|
+| AI 就绪度/卡位评估 | `lib/tier1/ai_readiness.py :: build_ai_readiness` | `/ai-readiness` | private-equity/ai-readiness（适配单票 + 复用 `ai_chokepoint_score`） |
+| 财报前预览 | `lib/tier1/earnings_preview.py :: build_earnings_preview` | `/earnings-preview` | equity-research/earnings-preview |
+| 模型增量更新 | `lib/tier1/model_update.py :: build_model_update` | `/model-update` | equity-research/model-update |
+| 组合收益归因 | `lib/tier1/returns_attrib.py :: build_returns_attribution` | `/returns` | private-equity/returns-analysis（适配二级市场组合） |
+| 组合再平衡（逐持仓+换手成本） | `lib/tier1/rebalance.py :: build_rebalance` | `/rebalance` | wealth-management/portfolio-rebalance（A 股适配：去 TLH + 印花税/佣金本地化） |
+
+说明：`/rebalance`（逐持仓 + A 股印花税/佣金换手成本）与既有 `build_portfolio_rebalance`（资产大类配置漂移）分工互补，前者出**调仓交易清单**、后者看**大类配置偏离**。
 
 ## 设计原则（全部来自原 SKILL.md 的 CRITICAL CONSTRAINTS）
 
