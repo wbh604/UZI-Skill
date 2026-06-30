@@ -606,6 +606,10 @@ def _render_school_lock_banner(syn: dict | None) -> str:
         "I": ("#4338ca", "rgba(99,102,241,0.10)", "🔗", "Serenity · AI 供应链卡脖子/瓶颈猎手"),
     }
     fg, bg, icon, members_hint = THEMES.get(group, ("#374151", "rgba(107,114,128,0.10)", "🎯", ""))
+    members_html = (
+        f'<div style="margin-top:4px;color:#6b7280;font-size:11px">代表评委 · {members_hint}</div>'
+        if members_hint else ""
+    )
 
     return (
         f'<div class="school-lock-banner" style="margin:16px 0;padding:14px 20px;'
@@ -620,7 +624,7 @@ def _render_school_lock_banner(syn: dict | None) -> str:
         f'      本次分析仅由 <strong style="color:{fg}">{group} · {label}</strong> 的评委参与评分 · '
         f'其他流派的评委已 skip · 报告里"评委打分板 / 流派分数 / 多空辩论"均限于该派内.'
         f'    </div>'
-        f'    {f"<div style=\"margin-top:4px;color:#6b7280;font-size:11px\">代表评委 · {members_hint}</div>" if members_hint else ""}'
+        f'    {members_html}'
         f'  </div>'
         f'</div>'
     )
@@ -645,4 +649,3 @@ def _render_institutional_section(raw: dict) -> str:
         _render_catalyst_calendar(d21) +
         _render_competitive_analysis(d22)
     )
-

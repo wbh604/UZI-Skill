@@ -223,6 +223,7 @@ def _render_segmental_block(ticker: str) -> str:
             cagr_row = '<div class="muted" style="font-size:11px">（agent 未填 3 情景 CAGR）</div>'
 
         note_html = f'<div class="seg-note">💡 {note}</div>' if note else ""
+        metrics_html = f'<div class="seg-metrics-row">{margin_badges}</div>' if margin_badges else ""
 
         segment_cards += (
             f'<div class="seg-card">'
@@ -233,7 +234,7 @@ def _render_segmental_block(ticker: str) -> str:
             f'    <span class="seg-share">{share:.1f}%</span>'
             f'  </div>'
             f'  <div class="seg-rev">{currency} <strong>{rev:,.1f}</strong> 亿</div>'
-            f'  {f"<div class=\"seg-metrics-row\">{margin_badges}</div>" if margin_badges else ""}'
+            f'  {metrics_html}'
             f'  {sparkline_html}'
             f'  <div class="seg-drivers">{drivers_html}</div>'
             f'  {cagr_row}'
@@ -551,5 +552,4 @@ def _svg_segment_projection(segments: list, rev_hist: list, width: int = 420, he
   {legend}
   {end_labels}
 </svg>'''
-
 
