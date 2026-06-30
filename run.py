@@ -281,6 +281,8 @@ def main():
                         help="分析完后用 Cloudflare Tunnel 映射公网链接")
     parser.add_argument("--no-browser", action="store_true",
                         help="不自动打开浏览器")
+    parser.add_argument("--no-open-report", action="store_true",
+                        help="生成报告但不自动打开本地 HTML 或 remote URL")
     parser.add_argument("--port", type=int, default=8976,
                         help="HTTP 服务端口 (默认 8976)")
     parser.add_argument("--force-name", metavar="CODE",
@@ -621,8 +623,14 @@ def main():
         except Exception as _e:
             print(f"⚠️  --output-dir 导出失败（不影响本地报告）: {_e}")
 
+    auto_open_report = (
+        not args.no_open_report
+        and not args.no_browser
+        and os.environ.get("UZI_NO_AUTO_OPEN") != "1"
+    )
+
     # 打开浏览器（本地模式）
-    if env["has_browser"] and not args.no_browser and not args.remote:
+    if env["has_browser"] and auto_open_report and not args.remote:
         import webbrowser
         webbrowser.open(standalone.as_uri())
         print(f"   🌐 已在浏览器中打开")
@@ -643,7 +651,7 @@ def main():
             print(f"按 Ctrl+C 停止服务。\n")
 
             # 如果有浏览器也打开
-            if env["has_browser"] and not args.no_browser:
+            if env["has_browser"] and auto_open_report:
                 import webbrowser
                 webbrowser.open(full_url)
 
