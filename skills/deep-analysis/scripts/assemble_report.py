@@ -76,8 +76,8 @@ from lib.report.svg_primitives import (  # noqa: E402, F401
 DIM_META = {
     "1_financials": {
         "id": "01", "title": "财报扎实度", "en": "Financials", "weight": 5, "cat": "fin",
-        "kpis": ["roe", "net_margin", "revenue_growth", "fcf"],
-        "kpi_labels": {"roe": "ROE", "net_margin": "净利率", "revenue_growth": "营收增速", "fcf": "自由现金流"},
+        "kpis": ["roe", "net_margin", "revenue_growth", "ocf"],
+        "kpi_labels": {"roe": "ROE", "net_margin": "净利率", "revenue_growth": "营收增速", "ocf": "经营现金流"},
     },
     "2_kline": {
         "id": "02", "title": "K 线技术面", "en": "Technical", "weight": 4, "cat": "mkt",

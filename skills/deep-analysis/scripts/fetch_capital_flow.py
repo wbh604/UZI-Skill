@@ -12,6 +12,7 @@
 v2.15.3 (#30) · 大宗交易 + 解禁数据走 ds.cached module-level · 避免每只股重抓全 A 数据（原每次 3+min，改后首次 3min 后续 < 1s）.
 """
 import json
+import os
 import sys
 
 import akshare as ak  # type: ignore
@@ -25,6 +26,38 @@ def _safe(fn, default):
         return fn()
     except Exception as e:
         return {"error": str(e)} if isinstance(default, dict) else default
+
+
+def _fetch_main_fund_flow(ti) -> list:
+    """Fast per-stock Eastmoney fund-flow path; safe to run in quick mode."""
+    return _safe(
+        lambda: ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower()).tail(20).to_dict("records"),
+        [],
+    )
+
+
+def _main_net_value(row: dict) -> float:
+    for key in ("主力净流入-净额", "主力净流入", "主力资金净流入", "主力净额"):
+        if key in row:
+            try:
+                return float(row.get(key) or 0)
+            except (ValueError, TypeError):
+                return 0.0
+    return 0.0
+
+
+def _format_amount_yuan(total: float) -> str:
+    if not total:
+        return "—"
+    return f"{total / 1e4:+.1f}万" if abs(total) < 1e8 else f"{total / 1e8:+.1f}亿"
+
+
+def _main_sum(flow_list: list, days=None) -> str:
+    if not flow_list:
+        return "—"
+    rows = flow_list[-days:] if days else flow_list
+    total = sum(_main_net_value(r) for r in rows if isinstance(r, dict))
+    return _format_amount_yuan(total)
 
 
 # v2.15.3 · 大宗/解禁数据按年缓存（TTL 24h · 数据日频更新）
@@ -127,6 +160,33 @@ def main(ticker: str) -> dict:
     if ti.market != "A":
         return {"ticker": ti.full, "data": {"_note": "capital_flow only A-share / HK for now"}, "source": "skip", "fallback": False}
 
+    main_flow = _fetch_main_fund_flow(ti)
+
+    heavy_enabled = os.environ.get("UZI_CAPITAL_FLOW_HEAVY") == "1"
+    if not heavy_enabled:
+        return {
+            "ticker": ti.full,
+            "data": {
+                "northbound": {},
+                "northbound_20d": "—",
+                "margin_recent": [],
+                "margin_trend": "—",
+                "holder_count_history": [],
+                "holders_trend": "—",
+                "main_fund_flow_20d": main_flow,
+                "main_20d": _main_sum(main_flow),
+                "main_5d": _main_sum(main_flow, days=5),
+                "block_trades_recent": [],
+                "unlock_recent": [],
+                "unlock_schedule": [],
+                "institutional_history": {"quarters": [], "fund": [], "qfii": [], "shehui": []},
+                "_skipped_universe_heavy": True,
+                "_note": "资金面重型接口默认跳过；如需大宗/解禁/机构持仓全市场数据，设置 UZI_CAPITAL_FLOW_HEAVY=1 后重跑。",
+            },
+            "source": "capital_flow:quick + akshare:stock_individual_fund_flow",
+            "fallback": False,
+        }
+
     north = ds.fetch_northbound(ti)
 
     # v2.15.3 · 融资明细走 universe cache · 按 exchange 缓存全市场最新一天
@@ -137,11 +197,6 @@ def main(ticker: str) -> dict:
 
     holders = _safe(
         lambda: ak.stock_zh_a_gdhs(symbol=ti.code).head(8).to_dict("records"),
-        [],
-    )
-
-    main_flow = _safe(
-        lambda: ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower()).tail(20).to_dict("records"),
         [],
     )
 

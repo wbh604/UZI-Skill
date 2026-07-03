@@ -100,6 +100,7 @@ class NetworkProfile:
 
 
 def _probe(domain: str, port: int = 443, timeout: float = 3.0) -> DomainCheck:
+    """TCP connect 探测单个域 · 自带总超时保护 · 单域最多 timeou 秒."""
     t0 = time.time()
     try:
         sock = socket.create_connection((domain, port), timeout=timeout)
@@ -120,6 +121,9 @@ def _probe(domain: str, port: int = 443, timeout: float = 3.0) -> DomainCheck:
         return DomainCheck(domain=domain, group="", reachable=False,
                            latency_ms=int((time.time() - t0) * 1000),
                            error=f"{type(e).__name__}: {str(e)[:80]}")
+
+# 预检整体超时上限（秒）· 避免网络极差时跑满 9×3=27s
+_PREFLIGHT_TOTAL_TIMEOUT = 15.0
 
 
 def _detect_proxy() -> tuple[bool, str]:
@@ -292,12 +296,26 @@ def run_preflight(verbose: bool = True, timeout: float = 3.0) -> NetworkProfile:
     """跑预检 · 返 NetworkProfile（不同于 v2.10.2 dict）· 自动写 cache.
 
     写入 `.cache/_global/network_profile.json` 供 agent/subagent 读。
+    整体超时 _PREFLIGHT_TOTAL_TIMEOUT 秒后自动截断剩余探测。
     """
     has_proxy, proxy_url = _detect_proxy()
 
+    preflight_start = time.time()
     results: list[DomainCheck] = []
     for domain, group, purpose in _ALL_TARGETS:
-        r = _probe(domain, timeout=timeout)
+        # 总超时保护：剩余时间不足则标记为 timeout 跳过
+        elapsed_total = time.time() - preflight_start
+        remaining = _PREFLIGHT_TOTAL_TIMEOUT - elapsed_total
+        if remaining <= 0.5:
+            results.append(DomainCheck(
+                domain=domain, group=group, reachable=False,
+                latency_ms=-1, error=f"preflight total timeout, skipped",
+                purpose=purpose,
+            ))
+            continue
+        # 单域超时取 min(timeout, remaining)
+        per_timeout = min(timeout, remaining)
+        r = _probe(domain, timeout=per_timeout)
         r.group = group
         r.purpose = purpose
         results.append(r)

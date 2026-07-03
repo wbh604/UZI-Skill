@@ -1311,4 +1311,3 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
             },
         },
     }
-

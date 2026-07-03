@@ -30,7 +30,7 @@ raw_data = {
                              "one_liner": "国内精密光学薄膜龙头，AR/AI 眼镜核心供应商，苹果产业链二供身份加持。"},
                     "source": "akshare:em", "fallback": False},
         "1_financials": {"data": {
-            "roe": "18.7%", "net_margin": "21.4%", "revenue_growth": "+28%", "fcf": "12.3亿",
+            "roe": "18.7%", "net_margin": "21.4%", "revenue_growth": "+28%", "ocf": "12.3亿",
             "roe_history": [12.4, 14.1, 15.8, 16.2, 17.5, 18.7],
             "revenue_history": [21.5, 25.8, 28.6, 32.1, 38.4, 49.2],
             "net_profit_history": [4.2, 5.1, 5.9, 6.8, 8.3, 10.5],
@@ -39,7 +39,7 @@ raw_data = {
             "dividend_amounts": [1.2, 1.5, 2.0, 2.5, 3.0],
             "dividend_yields": [0.8, 1.0, 1.4, 1.8, 2.1],
             "financial_health": {
-                "current_ratio": 2.4, "debt_ratio": 28.5, "fcf_margin": 118, "roic": 22.3,
+                "current_ratio": 2.4, "debt_ratio": 28.5, "ocf_to_ni": 118, "roic": 22.3,
             },
         }, "source": "akshare:financial_abstract", "fallback": False},
         "2_kline": {"data": (lambda: {

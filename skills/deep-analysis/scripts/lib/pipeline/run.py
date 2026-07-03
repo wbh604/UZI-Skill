@@ -9,11 +9,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .collect import collect as pipeline_collect
 from .score import score_from_cache
 from .synthesize import synthesize_and_render
+from lib.local_data_repair import enrich_raw_data_from_local_cache
 
 
 def run_pipeline(ticker: str, resume: bool = True) -> str:
@@ -32,7 +34,11 @@ def run_pipeline(ticker: str, resume: bool = True) -> str:
 
     print(f"🚀 [pipeline.run] collect · {ticker}")
     raw_previous = _load_cache(ticker) if resume else {}
-    raw_dict = pipeline_collect(ticker, raw_previous=raw_previous, max_workers=6)
+    try:
+        max_workers = max(1, int(os.environ.get("UZI_PIPELINE_MAX_WORKERS", "6")))
+    except ValueError:
+        max_workers = 6
+    raw_dict = pipeline_collect(ticker, raw_previous=raw_previous, max_workers=max_workers)
 
     # 组装 legacy 兼容 raw_data.json（dimensions + 顶层溢出字段）
     # v3.7.2 hotfix: 必须保留顶层 market/code/full。否则 US/HK 标的在 self_review/stock_features
@@ -54,6 +60,7 @@ def run_pipeline(ticker: str, resume: bool = True) -> str:
         if k in raw_dict:
             raw_data_compatible[k] = raw_dict[k]
 
+    enrich_raw_data_from_local_cache(raw_data_compatible)
     _write_cache(ticker, raw_data_compatible)
     print(f"✅ [pipeline.run] raw_data.json 已写 · 进入 scoring 段（v3.0 纯函数编排）")
 
@@ -107,13 +114,24 @@ def _load_cache(ticker: str) -> dict:
 
 def _write_cache(ticker: str, raw: dict) -> None:
     """写 raw_data.json · 让 legacy stage1 的 resume 能复用."""
+    from datetime import date, datetime
     from lib.market_router import parse_ticker
     ti = parse_ticker(ticker)
     import run_real_test as rrt
     cache_dir = Path(rrt.__file__).parent / ".cache" / ti.full
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / "raw_data.json"
+
+    def _default(obj):
+        if isinstance(obj, date):
+            return obj.isoformat()
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, bytes):
+            return obj.decode("utf-8", errors="replace")
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
     try:
-        cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2, default=_default), encoding="utf-8")
     except Exception as e:
         print(f"   ⚠️ 写 cache 失败: {e}")

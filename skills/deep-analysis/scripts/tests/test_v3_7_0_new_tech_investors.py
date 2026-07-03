@@ -100,7 +100,7 @@ NVDA_FEAT = {
     "roe": 80, "net_margin": 52, "gross_margin": 78,
     "rev_growth_yoy": 125, "rev_growth_3y": 80,
     "moat_total": 35, "industry_rank": 1,
-    "fcf_positive": True, "fcf_margin": 45,
+    "ocf_positive": True, "ocf_to_ni": 45,
     "rd_intensity": 12, "founder_active": True, "founder_ownership_pct": 3.5,
     "debt_ratio": 10,
     "roe_5y_above_15": 5, "roe_5y_min": 25, "net_profit_growth_3y": 95,
@@ -145,7 +145,7 @@ MAOTAI_FEAT = {
     "market_cap_yi": 23000, "pe_ttm": 28, "pb": 8.5,
     "roe": 42, "net_margin": 52.6, "gross_margin": 91.5,
     "rev_growth_3y": 12, "rev_growth_yoy": 10, "net_profit_growth_3y": 14,
-    "moat_total": 32, "industry_rank": 1, "fcf_positive": True,
+    "moat_total": 32, "industry_rank": 1, "ocf_positive": True,
     "debt_ratio": 15, "roe_5y_above_15": 5, "roe_5y_min": 30,
     "founder_active": True,  # 茅台老酱工艺传承 · 视为 founder ethos 长期对齐
 }

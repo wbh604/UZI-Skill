@@ -8,14 +8,21 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🎯 游资（UZI）Skills · 安装中..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# 检查 Python
-if ! command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
+# 检查 Python。若 UZI-Skill 放在项目目录内，优先使用父目录统一 .venv。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -x "$WORKSPACE_DIR/.venv/bin/python" ]; then
+    PYTHON="$WORKSPACE_DIR/.venv/bin/python"
+elif command -v python3 &>/dev/null; then
+    PYTHON=$(command -v python3)
+elif command -v python &>/dev/null; then
+    PYTHON=$(command -v python)
+else
     echo "❌ 未找到 Python，请先安装 Python 3.9+"
     exit 1
 fi
-
-PYTHON=$(command -v python3 || command -v python)
 echo "✓ Python: $($PYTHON --version)"
+echo "✓ Python path: $PYTHON"
 
 # 检查 git
 if ! command -v git &>/dev/null; then
@@ -23,8 +30,11 @@ if ! command -v git &>/dev/null; then
     exit 1
 fi
 
-# 克隆（如果不在仓库内）
-if [ ! -f "run.py" ]; then
+# 克隆（如果不在仓库内）。项目内已有 UZI-Skill 时，进入脚本所在目录。
+if [ -f "$SCRIPT_DIR/run.py" ]; then
+    cd "$SCRIPT_DIR"
+    echo "✓ 已在仓库目录中"
+elif [ ! -f "run.py" ]; then
     if [ -d "UZI-Skill" ]; then
         echo "✓ UZI-Skill 目录已存在，更新中..."
         cd UZI-Skill && git pull
@@ -37,8 +47,17 @@ else
     echo "✓ 已在仓库目录中"
 fi
 
-# 安装依赖 — 先试默认 pypi，挂了就自动切国内镜像（大陆网络环境友好）
+# 安装依赖 — 使用当前选定 Python，项目内安装时会复用父目录 .venv
 echo "📦 安装 Python 依赖..."
+
+if [ -f "$WORKSPACE_DIR/requirements.txt" ]; then
+    REQ_FILE="$WORKSPACE_DIR/requirements.txt"
+    export PIP_CACHE_DIR="$WORKSPACE_DIR/.cache/pip"
+    mkdir -p "$PIP_CACHE_DIR" 2>/dev/null || true
+else
+    REQ_FILE="requirements.txt"
+fi
+echo "✓ Requirements: $REQ_FILE"
 
 PIP_MIRRORS=(
     ""  # 默认 pypi.org（空字符串代表不指定 -i，走默认）
@@ -50,11 +69,11 @@ PIP_MIRRORS=(
 install_deps() {
     local mirror="$1"
     if [ -z "$mirror" ]; then
-        $PYTHON -m pip install -r requirements.txt -q 2>/dev/null
+        $PYTHON -m pip install -r "$REQ_FILE" -q 2>/dev/null
     else
         local host
         host=$(echo "$mirror" | awk -F/ '{print $3}')
-        $PYTHON -m pip install -r requirements.txt -q \
+        $PYTHON -m pip install -r "$REQ_FILE" -q \
             --index-url "$mirror" \
             --trusted-host "$host" 2>/dev/null
     fi
@@ -76,7 +95,7 @@ done
 
 if [ "$SUCCESS" -eq 0 ]; then
     echo "   ❌ 所有源都失败。手动试："
-    echo "      pip install -r requirements.txt \\"
+    echo "      pip install -r $REQ_FILE \\"
     echo "          -i https://pypi.tuna.tsinghua.edu.cn/simple"
     exit 1
 fi

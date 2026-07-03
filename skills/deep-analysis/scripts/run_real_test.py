@@ -31,7 +31,7 @@ from lib.investor_personas import get_comment as _persona_comment  # noqa: E402
 from lib.market_router import parse_ticker  # noqa: E402
 from lib.stock_features import extract_features  # noqa: E402
 from lib.investor_evaluator import evaluate as _evaluate_investor  # noqa: E402
-from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa: E402
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait  # noqa: E402
 
 # Fetcher registry: (module_name, dim_key, fetcher_args_fn)
 # fetcher_args_fn(ticker, raw_so_far) → args tuple for main()
@@ -154,6 +154,39 @@ def run_fetcher(module_name: str, args: tuple) -> dict:
         return {"data": {}, "source": module_name, "fallback": True, "error": f"{type(e).__name__}: {e}"}
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(float(os.environ.get(name, "")))
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _dynamic_fetcher_max_timeout(base_timeout: int) -> int | None:
+    absolute = _env_int("UZI_FETCHER_MAX_TIMEOUT", 0)
+    if absolute > 0:
+        return max(base_timeout, absolute)
+    multiplier_raw = os.environ.get("UZI_FETCHER_TIMEOUT_MULTIPLIER")
+    if multiplier_raw:
+        try:
+            multiplier = float(multiplier_raw)
+        except ValueError:
+            multiplier = 0
+        if multiplier > 0:
+            return max(base_timeout, int(base_timeout * multiplier))
+    return None
+
+
+def _timeout_fetcher_result(reason: str) -> dict:
+    return {
+        "data": {},
+        "_timeout": True,
+        "fallback": True,
+        "error": reason,
+        "source": "timeout",
+    }
+
+
 def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> dict:
     """Parallel fetcher execution via ThreadPoolExecutor.
 
@@ -166,6 +199,10 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
     are always re-fetched. Use `resume=False` (or env UZI_NO_RESUME=1) to
     force full re-fetch.
     """
+    try:
+        max_workers = max(1, int(os.environ.get("UZI_LEGACY_MAX_WORKERS", str(max_workers))))
+    except ValueError:
+        pass
     # v2.6 · 允许通过 env 关闭 resume（run.py --no-resume 设置）
     if os.environ.get("UZI_NO_RESUME") == "1":
         resume = False
@@ -302,7 +339,6 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
         result = run_fetcher(mod_name, args)
         return dim_key, mod_name, result, time.time() - t
 
-    from concurrent.futures import TimeoutError as _FutureTimeout
     # v2.6 · 增量持久化：每完成 N 个 fetcher 写一次 raw_data.json，crash/Ctrl+C 后 --resume 可续
     from lib.cache import write_task_output as _write_cache
     INCREMENTAL_SAVE_EVERY = 3
@@ -314,35 +350,56 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
         except Exception:
             pass
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_run_one, it): it for it in others}
-        # 整体 5 分钟硬上限；as_completed 内部按 future 自己 result(timeout=)
-        try:
-            for fut in as_completed(futures, timeout=300):
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    futures = {pool.submit(_run_one, it): it for it in others}
+    pending = set(futures)
+    env_idle_timeout = _env_int("UZI_FETCHER_IDLE_TIMEOUT", 0)
+    last_progress = time.time()
+    wave_started = last_progress
+    try:
+        while pending:
+            idle_timeout = max(
+                [env_idle_timeout]
+                + [
+                    PER_FETCHER_TIMEOUT_OVERRIDES.get(futures[fut][1], DEFAULT_PER_FETCHER_TIMEOUT)
+                    for fut in pending
+                ]
+            )
+            max_timeout = _dynamic_fetcher_max_timeout(idle_timeout)
+            now = time.time()
+            wait_timeout = max(0.1, idle_timeout - (now - last_progress))
+            if max_timeout is not None:
+                wait_timeout = min(wait_timeout, max(0.1, max_timeout - (now - wave_started)))
+            done, pending = wait(pending, timeout=wait_timeout, return_when=FIRST_COMPLETED)
+            if not done:
+                reason = (
+                    f"wave2 dynamic max timeout > {max_timeout}s"
+                    if max_timeout is not None and time.time() - wave_started >= max_timeout
+                    else f"wave2 idle timeout > {idle_timeout}s"
+                )
+                for fut in list(pending):
+                    _, dim_key_pending, _ = futures[fut]
+                    if dim_key_pending not in dims:
+                        dims[dim_key_pending] = _timeout_fetcher_result(reason)
+                    fut.cancel()
+                print(f"    timeout wave2 no progress; unfinished {len(pending)} fetcher marked")
+                _persist_progress()
+                break
+            last_progress = time.time()
+            for fut in done:
                 item = futures[fut]
                 _, dim_key_pending, _ = item
-                fetcher_timeout = PER_FETCHER_TIMEOUT_OVERRIDES.get(dim_key_pending, DEFAULT_PER_FETCHER_TIMEOUT)
                 try:
-                    dim_key, mod_name, result, elapsed = fut.result(timeout=fetcher_timeout)
+                    dim_key, mod_name, result, elapsed = fut.result()
                     dims[dim_key] = result
                     err = result.get("error") if isinstance(result, dict) else None
                     has_data = bool(result.get("data")) if isinstance(result, dict) else False
-                    status = "✗" if err else ("✓" if has_data else "·")
+                    status = "ERR" if err else ("OK" if has_data else "EMPTY")
                     tail = f" {err[:60]}" if err else ""
                     print(f"    {status} {dim_key:18} ({elapsed:5.1f}s){tail}")
                     completed_count += 1
                     if completed_count % INCREMENTAL_SAVE_EVERY == 0:
                         _persist_progress()
-                except _FutureTimeout:
-                    # 单 fetcher 超时 — 标记为超时维度，不影响其他 fetcher
-                    dims[dim_key_pending] = {
-                        "data": {},
-                        "_timeout": True,
-                        "fallback": True,
-                        "error": f"fetcher timeout > {fetcher_timeout}s",
-                        "source": "timeout"
-                    }
-                    print(f"    ⏱  {dim_key_pending:18} (>{fetcher_timeout}s · TIMEOUT · agent 可补抓)")
                 except Exception as e:
                     dims[dim_key_pending] = {
                         "data": {},
@@ -350,21 +407,9 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
                         "error": f"{type(e).__name__}: {str(e)[:120]}",
                         "source": "crash"
                     }
-                    print(f"    ✗ {dim_key_pending:18} crash: {type(e).__name__}: {str(e)[:60]}")
-        except _FutureTimeout:
-            # 整体 5 分钟超时 — 记录还没完成的 fetcher
-            unfinished = [futures[f] for f in futures if not f.done()]
-            for item in unfinished:
-                _, dim_key_pending, _ = item
-                if dim_key_pending not in dims:
-                    dims[dim_key_pending] = {
-                        "data": {},
-                        "_timeout": True,
-                        "fallback": True,
-                        "error": "wave2 overall timeout > 300s",
-                        "source": "timeout"
-                    }
-            print(f"    ⏱  wave2 整体超时 · 未完成 {len(unfinished)} 个 fetcher 已标记")
+                    print(f"    ERR {dim_key_pending:18} crash: {type(e).__name__}: {str(e)[:60]}")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     wave2_elapsed = time.time() - wave2_start
     print(f"  [wave 2] done in {wave2_elapsed:.1f}s")
 
@@ -397,29 +442,40 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
         except Exception as e:
             return ("similar_stocks", [], str(e))
 
-    # v2.6 · wave3 同样加 60s timeout per fetcher（fund_holders 默认抓全量，可能慢）
-    from concurrent.futures import TimeoutError as _FutureTimeout
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        wave3_futures = {pool.submit(_fund_holders): "fund_managers", pool.submit(_similar_stocks): "similar_stocks"}
-        try:
-            for fut in as_completed(wave3_futures, timeout=180):
+    pool = ThreadPoolExecutor(max_workers=2)
+    wave3_futures = {pool.submit(_fund_holders): "fund_managers", pool.submit(_similar_stocks): "similar_stocks"}
+    pending = set(wave3_futures)
+    idle_timeout = _env_int("UZI_FETCHER_IDLE_TIMEOUT", 120)
+    max_timeout = _dynamic_fetcher_max_timeout(idle_timeout)
+    last_progress = time.time()
+    wave_started = last_progress
+    try:
+        while pending:
+            now = time.time()
+            wait_timeout = max(0.1, idle_timeout - (now - last_progress))
+            if max_timeout is not None:
+                wait_timeout = min(wait_timeout, max(0.1, max_timeout - (now - wave_started)))
+            done, pending = wait(pending, timeout=wait_timeout, return_when=FIRST_COMPLETED)
+            if not done:
+                for fut in list(pending):
+                    key_pending = wave3_futures[fut]
+                    raw.setdefault(key_pending, [])
+                    fut.cancel()
+                print(f"    timeout wave3 no progress; unfinished {len(pending)} task marked")
+                break
+            last_progress = time.time()
+            for fut in done:
                 key_pending = wave3_futures[fut]
                 try:
-                    key, val, err = fut.result(timeout=120)
+                    key, val, err = fut.result()
                     raw[key] = val
-                    status = "✗" if err else "✓"
+                    status = "ERR" if err else "OK"
                     print(f"    {status} {key}: {len(val) if isinstance(val, list) else 'n/a'}")
-                except _FutureTimeout:
-                    raw[key_pending] = []
-                    print(f"    ⏱  {key_pending} (>120s · TIMEOUT)")
                 except Exception as e:
                     raw[key_pending] = []
-                    print(f"    ✗ {key_pending} crash: {type(e).__name__}: {str(e)[:60]}")
-        except _FutureTimeout:
-            for f, k in wave3_futures.items():
-                if not f.done() and k not in raw:
-                    raw[k] = []
-            print(f"    ⏱  wave3 overall timeout")
+                    print(f"    ERR {key_pending} crash: {type(e).__name__}: {str(e)[:60]}")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     wave3_elapsed = time.time() - wave3_start
     print(f"  [wave 3] done in {wave3_elapsed:.1f}s")
 
@@ -508,6 +564,11 @@ def stage1(ticker: str) -> dict:
 
     print("📊 Task 1 · 数据采集")
     raw = collect_raw_data(ti.full)
+    try:
+        from lib.local_data_repair import enrich_raw_data_from_local_cache
+        enrich_raw_data_from_local_cache(raw)
+    except Exception as _ldr_e:
+        print(f"   ⚠️ local_data_repair 跳过: {type(_ldr_e).__name__}: {str(_ldr_e)[:120]}")
     write_task_output(ti.full, "raw_data", raw)
 
     # Data integrity check

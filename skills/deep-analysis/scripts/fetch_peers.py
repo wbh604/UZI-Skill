@@ -184,6 +184,14 @@ def main(ticker: str) -> dict:
                 fallback_reason = "所有同行数据源失败 · 仅返回公司自身"
             source_used += " (self-only fallback)"
 
+    if ti.market == "A" and not peer_table:
+        peer_table, peer_comparison = _build_self_only_table(ti, basic)
+        fallback_used = True
+        if not fallback_reason:
+            fallback_reason = "行业缺失或同行数据源失败 · 仅返回公司自身"
+        if "self-only fallback" not in source_used:
+            source_used += " (self-only fallback)"
+
     return {
         "ticker": ti.full,
         "data": {

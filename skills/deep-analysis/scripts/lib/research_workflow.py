@@ -185,11 +185,11 @@ def _build_thesis_pillars(features: dict, fin: dict, moat: dict) -> list[dict]:
             "weight": "Medium",
         })
 
-    fcf_pos = features.get("fcf_positive", False)
-    if fcf_pos:
+    ocf_pos = features.get("ocf_positive", False)
+    if ocf_pos:
         pillars.append({
-            "pillar": "自由现金流健康",
-            "evidence": "持续正 FCF 支撑分红与再投资",
+            "pillar": "经营现金流健康",
+            "evidence": "持续正 OCF 支撑分红与再投资",
             "weight": "Medium",
         })
 
@@ -214,8 +214,8 @@ def _build_risks(features: dict, fin: dict) -> list[dict]:
     if features.get("pe", 0) > 60:
         risks.append({"risk": "估值偏高", "severity": "Medium",
                       "detail": f"PE {features.get('pe', 0):.0f}x 高于市场"})
-    if not features.get("fcf_positive", True):
-        risks.append({"risk": "自由现金流为负", "severity": "High",
+    if not features.get("ocf_positive", True):
+        risks.append({"risk": "经营现金流为负", "severity": "High",
                       "detail": "长期依赖外部融资"})
     if features.get("pct_from_60d_high", 0) < -20:
         risks.append({"risk": "近期动量弱", "severity": "Low",
@@ -537,11 +537,11 @@ def build_thesis_tracker(features: dict, raw_data: dict, direction: str = "long"
             "verdict": "✅" if features.get("pe", 100) < 40 else "⚠️",
         },
         {
-            "pillar": "FCF 为正",
-            "original_target": "持续正 FCF",
-            "current_status": "正" if features.get("fcf_positive") else "负",
-            "trend": "stable" if features.get("fcf_positive") else "concerning",
-            "verdict": "✅" if features.get("fcf_positive") else "⚠️",
+            "pillar": "OCF 为正",
+            "original_target": "持续正 OCF",
+            "current_status": "正" if features.get("ocf_positive") else "负",
+            "trend": "stable" if features.get("ocf_positive") else "concerning",
+            "verdict": "✅" if features.get("ocf_positive") else "⚠️",
         },
     ]
 
@@ -640,7 +640,7 @@ def run_idea_screen(features: dict, style: str = "quality") -> dict:
             ("PE < 15", features.get("pe", 100) < 15),
             ("PB < 1.5", features.get("pb", 100) < 1.5),
             ("股息率 > 3%", features.get("dividend_yield", 0) > 3),
-            ("FCF > 0", features.get("fcf_positive", False)),
+            ("OCF > 0", features.get("ocf_positive", False)),
             ("资产负债率 < 50%", 0 < features.get("debt_ratio", 100) < 50),
         ],
         "growth": [
@@ -652,7 +652,7 @@ def run_idea_screen(features: dict, style: str = "quality") -> dict:
         "quality": [
             ("ROE 连续 5 年 > 15%", features.get("roe_5y_above_15", 0) >= 4),
             ("净利率 > 15%", features.get("net_margin", 0) > 15),
-            ("FCF 持续为正", features.get("fcf_positive", False)),
+            ("OCF 持续为正", features.get("ocf_positive", False)),
             ("资产负债率 < 50%", 0 < features.get("debt_ratio", 100) < 50),
             ("护城河 ≥ 28/40", features.get("moat_total", 0) >= 28),
         ],
@@ -733,7 +733,7 @@ if __name__ == "__main__":
     import json
     test = {
         "pe": 35, "pb": 2.8, "roe_last": 11.8, "roe_5y_above_15": 0, "net_margin": 12,
-        "fcf_positive": True, "rev_growth_3y": 18, "eps_growth_3y": 15, "debt_ratio": 30,
+        "ocf_positive": True, "rev_growth_3y": 18, "eps_growth_3y": 15, "debt_ratio": 30,
         "stage_num": 2, "moat_total": 27, "peg": 2.3,
     }
     print(json.dumps(run_idea_screen(test, "quality"), ensure_ascii=False, indent=2))

@@ -48,6 +48,11 @@ def score_from_cache(ticker: str) -> dict:
         )
 
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    try:
+        from lib.local_data_repair import enrich_raw_data_from_local_cache
+        enrich_raw_data_from_local_cache(raw)
+    except Exception as e:
+        print(f"   ⚠️ local_data_repair 跳过: {type(e).__name__}: {str(e)[:80]}")
 
     # v2.6.1 · MX API 兜底补齐定性维度（原地改 raw · 不 raise）
     try:

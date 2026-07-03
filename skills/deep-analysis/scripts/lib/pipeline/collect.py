@@ -1,4 +1,4 @@
-"""pipeline.collect · wave-based 数据采集编排器.
+﻿"""pipeline.collect · wave-based 数据采集编排器.
 
 v3.0.0 Phase 7+ · 性能跟 legacy collect_raw_data 完全对齐.
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any
 
 from .fetchers.registry import FETCHER_REGISTRY, get_fetcher
@@ -34,6 +34,60 @@ DEPENDENT_DIMS = {"3_macro", "7_industry", "9_futures", "13_policy"}
 # 必须串行跑 · 跟 legacy `_MINI_RACER_FETCHERS` 一致
 _MINI_RACER_LEGACY_MODULES = {"fetch_industry", "fetch_capital_flow", "fetch_valuation"}
 _MINI_RACER_LOCK = threading.Lock()
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(float(os.environ.get(name, "")))
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _dynamic_max_timeout(base_timeout: int) -> int | None:
+    absolute = _env_int("UZI_FETCHER_MAX_TIMEOUT", 0)
+    if absolute > 0:
+        return max(base_timeout, absolute)
+    multiplier_raw = os.environ.get("UZI_FETCHER_TIMEOUT_MULTIPLIER")
+    if multiplier_raw:
+        try:
+            multiplier = float(multiplier_raw)
+        except ValueError:
+            multiplier = 0
+        if multiplier > 0:
+            return max(base_timeout, int(base_timeout * multiplier))
+    return None
+
+
+def _timeout_dim(dim_key: str, reason: str) -> dict:
+    result = DimResult.error_result(dim_key, reason, source="timeout").to_dict()
+    result["_timeout"] = True
+    result["error"] = reason
+    return result
+
+
+def _run_single_dynamic(dim_key: str, fn) -> tuple[dict, dict]:
+    idle_timeout = _env_int("UZI_FETCHER_IDLE_TIMEOUT", 120)
+    max_timeout = _dynamic_max_timeout(idle_timeout)
+    started = time.time()
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(fn)
+        while True:
+            elapsed = time.time() - started
+            deadline = idle_timeout if max_timeout is None else min(idle_timeout, max(0.1, max_timeout - elapsed))
+            done, _ = wait({future}, timeout=deadline, return_when=FIRST_COMPLETED)
+            if done:
+                try:
+                    return future.result()
+                except Exception as exc:
+                    return _timeout_dim(dim_key, f"{type(exc).__name__}: {exc}"), {}
+            elapsed = time.time() - started
+            if max_timeout is not None and elapsed >= max_timeout:
+                return _timeout_dim(dim_key, f"fetcher dynamic max timeout > {max_timeout}s"), {}
+            return _timeout_dim(dim_key, f"fetcher idle timeout > {idle_timeout}s"), {}
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def is_pipeline_enabled() -> bool:
@@ -70,21 +124,41 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
         print("  [pipeline] 0_basic · resume cache")
         out["0_basic"] = basic_dim
     else:
-        print("  [pipeline] wave 1 · 0_basic", end="", flush=True)
+        print("  [pipeline] wave 1 - 0_basic", end="", flush=True)
         t_w1 = time.time()
         basic_fetcher = get_fetcher("0_basic")
-        result = basic_fetcher.fetch(ticker)
-        out["0_basic"] = result.to_dict()
-        # 写顶层溢出字段
-        for k, v in result.top_level_fields.items():
+
+        def _run_basic():
+            result = basic_fetcher.fetch(ticker)
+            return result.to_dict(), result.top_level_fields
+
+        result_dict, top_level = _run_single_dynamic("0_basic", _run_basic)
+        out["0_basic"] = result_dict
+        for k, v in top_level.items():
             out[k] = v
-        print(f" · {result.quality.value} ({time.time()-t_w1:.1f}s)")
+        q = (result_dict.get("_pipeline") or {}).get("quality", "?")
+        print(f" - {q} ({time.time()-t_w1:.1f}s)")
 
     basic_data = out["0_basic"].get("data") or {}
+
+    try:
+        from lib.analysis_profile import get_profile as _get_profile
+        _profile = _get_profile()
+        enabled_dims = set(_profile.fetchers_enabled)
+    except Exception:
+        _profile = None
+        enabled_dims = None
 
     # Wave 2 · 非依赖型 fetcher 并发
     non_dep_dims = [d for d in FETCHER_REGISTRY.keys()
                     if d not in DEPENDENT_DIMS and d != "0_basic"]
+    if enabled_dims is not None:
+        before = len(non_dep_dims)
+        non_dep_dims = [d for d in non_dep_dims if d in enabled_dims]
+        skipped = before - len(non_dep_dims)
+        if skipped:
+            depth = getattr(_profile, "depth", "unknown")
+            print(f"  [pipeline] profile={depth} · skip {skipped} non-core fetchers")
     print(f"  [pipeline] wave 2 · {len(non_dep_dims)} fetcher (max_workers={max_workers})")
 
     def _run(dim_key: str) -> tuple[str, dict, dict]:
@@ -110,26 +184,65 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
 
     # 构造 raw dict 给 args_fn 用（部分 fetcher 需要从 0_basic 拿 industry）
     # 但 wave 2 的 non-dependent 不需要 raw · 此处简化
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_run, d): d for d in non_dep_dims}
-        for f in as_completed(futures):
-            try:
-                dim_key, result_dict, top_level = f.result(timeout=120)
-                out[dim_key] = result_dict
-                for k, v in top_level.items():
-                    out[k] = v
-                q = (result_dict.get("_pipeline") or {}).get("quality", "?")
-                print(f"    ✓ {dim_key:20s} {q}")
-            except Exception as e:
+    if not non_dep_dims:
+        print("  [pipeline] wave 2 · no fetcher enabled")
+    pool = ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(non_dep_dims) or 1)))
+    futures = {pool.submit(_run, d): d for d in non_dep_dims}
+    pending = set(futures)
+    idle_timeout = _env_int("UZI_FETCHER_IDLE_TIMEOUT", 120)
+    max_timeout = _dynamic_max_timeout(idle_timeout)
+    wave_started = time.time()
+    last_progress = wave_started
+    try:
+        while pending:
+            now = time.time()
+            wait_timeout = max(0.1, idle_timeout - (now - last_progress))
+            if max_timeout is not None:
+                wait_timeout = min(wait_timeout, max(0.1, max_timeout - (now - wave_started)))
+            done, pending = wait(pending, timeout=wait_timeout, return_when=FIRST_COMPLETED)
+            if not done:
+                reason = (
+                    f"wave2 dynamic max timeout > {max_timeout}s"
+                    if max_timeout is not None and time.time() - wave_started >= max_timeout
+                    else f"wave2 idle timeout > {idle_timeout}s"
+                )
+                for f in list(pending):
+                    d = futures[f]
+                    out[d] = _timeout_dim(d, reason)
+                    print(f"    ⏱ {d:20s} {reason}")
+                    f.cancel()
+                break
+            last_progress = time.time()
+            for f in done:
                 d = futures[f]
-                print(f"    ✗ {d:20s} {type(e).__name__}: {str(e)[:80]}")
-                out[d] = DimResult.error_result(d, f"{type(e).__name__}: {e}").to_dict()
+                if d in out:
+                    continue
+                try:
+                    dim_key, result_dict, top_level = f.result()
+                    out[dim_key] = result_dict
+                    for k, v in top_level.items():
+                        out[k] = v
+                    q = (result_dict.get("_pipeline") or {}).get("quality", "?")
+                    print(f"    ✓ {dim_key:20s} {q}")
+                except Exception as e:
+                    print(f"    ✗ {d:20s} {type(e).__name__}: {str(e)[:80]}")
+                    out[d] = DimResult.error_result(d, f"{type(e).__name__}: {e}").to_dict()
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # Wave 3 · 依赖 industry 的 fetcher · 串行（industry 是 shared context）
-    print(f"  [pipeline] wave 3 · {len(DEPENDENT_DIMS)} dependent fetcher")
+    dependent_dims = sorted(DEPENDENT_DIMS)
+    if enabled_dims is not None:
+        before = len(dependent_dims)
+        dependent_dims = [d for d in dependent_dims if d in enabled_dims]
+        skipped = before - len(dependent_dims)
+        if skipped:
+            depth = getattr(_profile, "depth", "unknown")
+            print(f"  [pipeline] profile={depth} · skip {skipped} dependent fetchers")
+    print(f"  [pipeline] wave 3 · {len(dependent_dims)} dependent fetcher")
     # 构造 raw-shaped dict 给 args_fn
     raw_for_deps = {"0_basic": out["0_basic"]}
-    for dim_key in sorted(DEPENDENT_DIMS):
+    for dim_key in dependent_dims:
         cached = raw_previous.get("dimensions", {}).get(dim_key)
         if cached and _is_resume_valid(cached):
             out[dim_key] = cached
@@ -141,11 +254,15 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
             # 依赖 fetcher 的 _fetch_raw 收 raw 参数 · 但 BaseFetcher.fetch() 不传 raw
             # 临时方案：monkey-patch args_fn 变量闭包已经 bound 了 r · 但 raw 传不进去
             # 解决：给 BaseFetcher.fetch 加可选 context 参数
-            result = _fetch_with_context(fetcher, ticker, raw_for_deps)
-            out[dim_key] = result.to_dict()
-            for k, v in result.top_level_fields.items():
+            def _run_dep(fetcher=fetcher):
+                result = _fetch_with_context(fetcher, ticker, raw_for_deps)
+                return result.to_dict(), result.top_level_fields
+            result_dict, top_level = _run_single_dynamic(dim_key, _run_dep)
+            out[dim_key] = result_dict
+            for k, v in top_level.items():
                 out[k] = v
-            print(f"    ✓ {dim_key:20s} {result.quality.value}")
+            q = (result_dict.get("_pipeline") or {}).get("quality", "?")
+            print(f"    ✓ {dim_key:20s} {q}")
         except Exception as e:
             print(f"    ✗ {dim_key:20s} {type(e).__name__}: {str(e)[:80]}")
             out[dim_key] = DimResult.error_result(dim_key, f"{type(e).__name__}: {e}").to_dict()

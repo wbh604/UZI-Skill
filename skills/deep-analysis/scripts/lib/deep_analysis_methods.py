@@ -64,7 +64,7 @@ def build_ic_memo(
         "net_profit_hist_yi": fin.get("net_profit_history", [])[-5:],
         "net_margin": features.get("net_margin", 0),
         "debt_ratio": features.get("debt_ratio", 0),
-        "fcf_positive": features.get("fcf_positive", False),
+        "ocf_positive": features.get("ocf_positive", False),
     }
 
     # V. Valuation
@@ -121,7 +121,7 @@ def _ic_recommendation(features: dict, dcf: dict | None) -> tuple[str, str]:
     quality_score = 0
     if features.get("roe_5y_above_15", 0) >= 3:
         quality_score += 2
-    if features.get("fcf_positive"):
+    if features.get("ocf_positive"):
         quality_score += 1
     if features.get("net_margin", 0) > 15:
         quality_score += 1
@@ -173,7 +173,7 @@ def _ic_risks(features: dict, moat: dict) -> list[dict]:
             "severity": "Medium",
             "mitigant": "等待 PE 回归 40 以下再建仓",
         })
-    if not features.get("fcf_positive", True):
+    if not features.get("ocf_positive", True):
         risks.append({
             "risk": "现金流为负",
             "detail": "依赖外部融资",
@@ -395,7 +395,7 @@ def build_dd_checklist(features: dict, raw_data: dict) -> dict:
                 {"item": "5 年营收 / 净利历史", "status": _check(bool(dims.get("1_financials", {}).get("data", {}).get("revenue_history")))},
                 {"item": "ROE / 毛利 / 净利率", "status": _check(bool(features.get("roe_last", 0)))},
                 {"item": "资产负债率", "status": _check(bool(features.get("debt_ratio", 0)))},
-                {"item": "自由现金流", "status": _check(bool(features.get("fcf_positive", False)))},
+                {"item": "经营现金流", "status": _check(bool(features.get("ocf_positive", False)))},
                 {"item": "审计意见 / 会计政策", "status": "⚪ 需人工核查"},
             ],
         },
@@ -596,7 +596,7 @@ def build_portfolio_rebalance(
 if __name__ == "__main__":
     import json
     test = {
-        "roe_5y_above_15": 0, "fcf_positive": True, "net_margin": 12.5,
+        "roe_5y_above_15": 0, "ocf_positive": True, "net_margin": 12.5,
         "moat_total": 27, "pe": 35, "debt_ratio": 30,
         "revenue_latest_yi": 52, "ebitda_yi": 10, "gross_margin": 35,
         "market_cap_yi": 260, "market_share": 12, "industry_growth": 14,

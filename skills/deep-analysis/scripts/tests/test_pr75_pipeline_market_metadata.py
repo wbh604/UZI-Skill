@@ -100,4 +100,4 @@ def test_run_py_writes_market_code_full():
     assert '"code":' in src
     assert '"full":' in src
     # default=str 防 datetime 序列化崩溃
-    assert "default=str" in src
+    assert "default=str" in src or "default=_default" in src

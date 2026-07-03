@@ -309,9 +309,17 @@ def fetch_basic(ti: TickerInfo) -> dict:
 
 
 def _fetch_basic_a(ti: TickerInfo) -> dict:
+    out = {"code": ti.full}
+    try:
+        return _fetch_basic_a_inner(ti, out)
+    except Exception as e:
+        out["_basic_chain_err"] = f"{type(e).__name__}: {str(e)[:120]}"
+        return _ensure_a_share_basic_fields(out, ti)
+
+
+def _fetch_basic_a_inner(ti: TickerInfo, out: dict) -> dict:
     if ak is None:
         raise RuntimeError("akshare not installed")
-    out = {"code": ti.full}
     xq_symbol = ("SH" if ti.full.endswith("SH") else "SZ") + ti.code
 
     # TIER 0 (optional): MX 妙想 Skills Hub — official NLP API. Used when MX_APIKEY is set.
@@ -1226,6 +1234,26 @@ def fetch_lhb_recent(ti: TickerInfo, days: int = 30) -> list[dict]:
     return cached(ti.full, key, lambda: _fetch_lhb_impl(ti, days), ttl=TTL_DAILY)
 
 
+def _fetch_lhb_all_market_summary(ti: TickerInfo, days: int) -> list[dict]:
+    """Fallback to all-market LHB summary when the per-stock date endpoint is empty."""
+    try:
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        end = datetime.now().strftime("%Y%m%d")
+        df = ak.stock_lhb_detail_em(start_date=start, end_date=end)
+    except Exception:
+        return []
+    if df is None or df.empty:
+        return []
+    code_col = next((c for c in ("代码", "股票代码") if c in df.columns), None)
+    if not code_col:
+        return []
+    try:
+        sub = df[df[code_col].astype(str).str.zfill(6) == ti.code]
+    except Exception:
+        return []
+    return sub.to_dict("records") if sub is not None and not sub.empty else []
+
+
 def _fetch_lhb_impl(ti: TickerInfo, days: int) -> list[dict]:
     """Fetch seat-level LHB records for the past N days.
 
@@ -1242,9 +1270,11 @@ def _fetch_lhb_impl(ti: TickerInfo, days: int) -> list[dict]:
     try:
         dates_df = ak.stock_lhb_stock_detail_date_em(symbol=ti.code)
     except Exception:
-        return []
+        return _fetch_lhb_all_market_summary(ti, days)
+    if dates_df is None or dates_df.empty:
+        return _fetch_lhb_all_market_summary(ti, days)
     if dates_df is None or dates_df.empty or "交易日" not in dates_df.columns:
-        return []
+        return _fetch_lhb_all_market_summary(ti, days)
 
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     dates: list[str] = []
@@ -1268,7 +1298,7 @@ def _fetch_lhb_impl(ti: TickerInfo, days: int) -> list[dict]:
                 break
         df["上榜日"] = dt
         all_records.extend(df.to_dict("records"))
-    return all_records
+    return all_records if all_records else _fetch_lhb_all_market_summary(ti, days)
 
 
 # ─────────────────────────────────────────────────────────────

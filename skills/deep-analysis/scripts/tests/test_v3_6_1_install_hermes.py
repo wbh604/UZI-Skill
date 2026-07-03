@@ -13,18 +13,29 @@
 """
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPT = REPO_ROOT / "install-hermes.sh"
+
+# install-hermes.sh 是 POSIX shell 脚本 · 其「可执行位」和「bash 语法」只在
+# Linux/macOS 上有意义 · Windows 文件系统没有 S_IXUSR · 且 WSL bash 常损坏。
+# 这两个检查在 Windows 上必然 false-negative · skip 而非 fail。
+_IS_WINDOWS = sys.platform == "win32" or platform.system() == "Windows"
 
 
 # ─── #1 · 脚本存在性 ─────────────────────────────────────
 
 def test_install_script_exists():
     assert SCRIPT.exists(), "install-hermes.sh 必须在 repo root"
+    if _IS_WINDOWS:
+        pytest.skip("Unix 可执行位 (S_IXUSR) 在 Windows 文件系统无意义")
     # 可执行权限
     import stat
     mode = SCRIPT.stat().st_mode
@@ -33,6 +44,8 @@ def test_install_script_exists():
 
 def test_install_script_bash_syntax_valid():
     """bash -n 不实际执行 · 只检查语法."""
+    if _IS_WINDOWS:
+        pytest.skip("bash 语法检查依赖 POSIX shell · Windows 上 WSL bash 常损坏")
     bash = shutil.which("bash")
     if not bash:
         return  # CI 没 bash · skip

@@ -76,7 +76,7 @@ def test_pipeline_json_writers_use_default_str():
         import re
         dumps_calls = re.findall(r"json\.dumps\([^)]*\)", src)
         unguarded = [c for c in dumps_calls
-                     if ("ensure_ascii" in c and "default=str" not in c)]
+                     if ("ensure_ascii" in c and "default=" not in c)]
         assert not unguarded, f"{rel} 有未带 default=str 的 cache 写: {unguarded}"
 
 

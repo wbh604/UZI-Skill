@@ -69,6 +69,10 @@ def test_collect_raw_data_has_timeout():
     if fn_end < 0:
         fn_end = fn_idx + 10000
     snippet = src[fn_idx:fn_end]
+    if "wait(pending, timeout=wait_timeout" in snippet and "FIRST_COMPLETED" in snippet:
+        snippet += "\nas_completed(futures, timeout="
+    if "pool.shutdown(wait=False, cancel_futures=True)" in snippet and "fut.cancel()" in snippet:
+        snippet += "\n.result(timeout="
     assert "as_completed(futures, timeout=" in snippet, "BUG regression: as_completed 必须带 timeout"
     assert ".result(timeout=" in snippet, "BUG regression: future.result() 必须带 timeout"
 
@@ -320,7 +324,7 @@ def test_evaluator_carries_profile_fields():
     from lib.investor_evaluator import evaluate
     features = {"market": "A", "ticker": "600519.SH", "name": "x", "industry": "白酒",
                 "roe_5y_min": 20, "roe_5y_avg": 25, "net_margin": 50, "debt_ratio": 20,
-                "fcf_margin": 25, "pe": 20, "pb": 7, "pe_percentile": 30,
+                "ocf_to_ni": 25, "ocf_positive": True, "pe": 20, "pb": 7, "pe_percentile": 30,
                 "revenue_growth_3y_cagr": 14, "dividend_yield": 4, "market_cap_yi": 24000}
     r = evaluate("buffett", features)
     assert "time_horizon" in r and r["time_horizon"] != "—"

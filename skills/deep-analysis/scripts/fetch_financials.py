@@ -2,7 +2,7 @@
 
 Output shape (matches report viz expectations):
 {
-  "roe": "18.7%", "net_margin": "...", "revenue_growth": "...", "fcf": "...",
+  "roe": "18.7%", "net_margin": "...", "revenue_growth": "...", "ocf": "...",
   "roe_history":        [12.4, 14.1, 15.8, 16.2, 17.5, 18.7],   # 5Y+
   "revenue_history":    [21.5, 25.8, 28.6, 32.1, 38.4, 49.2],   # 亿
   "net_profit_history": [4.2,  5.1,  5.9,  6.8,  8.3,  10.5],   # 亿
@@ -13,7 +13,7 @@ Output shape (matches report viz expectations):
   "financial_health": {
       "current_ratio": 2.4,
       "debt_ratio":    28.5,
-      "fcf_margin":   118.0,
+      "ocf_to_ni":    118.0,
       "roic":          22.3,
   }
 }
@@ -42,6 +42,33 @@ def _to_yi(v) -> float:
     """Convert raw (often 元) to 亿."""
     n = _to_float(v)
     return round(n / 1e8, 2)
+
+
+def _extract_ocf_history(df) -> list[float]:
+    """Extract operating cash-flow history from Eastmoney cash-flow tables."""
+    if df is None or df.empty:
+        return []
+
+    work = df.copy()
+    date_col = next((c for c in work.columns if any(k in str(c).upper() for k in ("REPORT_DATE", "REPORTDATE"))), None)
+    if date_col is None:
+        date_col = next((c for c in work.columns if any(k in str(c) for k in ("报告期", "日期", "截止"))), None)
+    if date_col:
+        work = work.sort_values(date_col)
+
+    ocf_col = next((c for c in work.columns if "经营活动产生的现金流量净额" in str(c)), None)
+    if ocf_col is None:
+        ocf_col = next((c for c in work.columns if "NETCASH_OPERATE" in str(c).upper()), None)
+    if ocf_col is None:
+        return []
+
+    vals = []
+    for v in work[ocf_col].tolist():
+        if v in (None, "", "--", "-"):
+            continue
+        n = _to_float(v)
+        vals.append(round(n / 1e8, 2))
+    return vals[-6:]
 
 
 def _fetch_a_share(ti) -> dict:
@@ -149,20 +176,33 @@ def _fetch_a_share(ti) -> dict:
     except Exception:
         pass
 
-    # ─── 4. 现金流 (FCF 占净利比)
+    # ─── 4. 现金流 (OCF / 净利)
+    em_symbol = f"{'SZ' if ti.full.endswith('SZ') else 'SH'}{code}"
     try:
-        df_cf = ak.stock_cash_flow_sheet_by_report_em(symbol=f"{'SZ' if ti.full.endswith('SZ') else 'SH'}{code}")
-        if df_cf is not None and not df_cf.empty:
-            # 最近一期 经营性现金流
-            if "经营活动产生的现金流量净额" in df_cf.columns:
-                ocf = _to_float(df_cf["经营活动产生的现金流量净额"].iloc[0])
-                out["fcf"] = f"{ocf / 1e8:.1f}亿"
-                # ocf/np
+        df_cf = ak.stock_cash_flow_sheet_by_yearly_em(symbol=em_symbol)
+        ocf_history = _extract_ocf_history(df_cf)
+        if not ocf_history:
+            df_cf = ak.stock_cash_flow_sheet_by_quarterly_em(symbol=em_symbol)
+            ocf_history = _extract_ocf_history(df_cf)
+        if ocf_history:
+            out["ocf_history"] = ocf_history
+            out["ocf"] = f"{ocf_history[-1]:.1f}亿"
+            np_latest = (out.get("net_profit_history") or [0])[-1]
+            if np_latest:
+                out.setdefault("financial_health", {})["ocf_to_ni"] = round(ocf_history[-1] / np_latest * 100, 1)
+    except Exception as e:
+        out["_ocf_err"] = f"{type(e).__name__}: {str(e)[:120]}"
+        try:
+            df_cf = ak.stock_cash_flow_sheet_by_quarterly_em(symbol=em_symbol)
+            ocf_history = _extract_ocf_history(df_cf)
+            if ocf_history:
+                out["ocf_history"] = ocf_history
+                out["ocf"] = f"{ocf_history[-1]:.1f}亿"
                 np_latest = (out.get("net_profit_history") or [0])[-1]
                 if np_latest:
-                    out.setdefault("financial_health", {})["fcf_margin"] = round(ocf / 1e8 / np_latest * 100, 1)
-    except Exception:
-        pass
+                    out.setdefault("financial_health", {})["ocf_to_ni"] = round(ocf_history[-1] / np_latest * 100, 1)
+        except Exception as e2:
+            out["_ocf_err"] += f" | fallback {type(e2).__name__}: {str(e2)[:80]}"
 
     # ─── 5. 分红历史
     try:
@@ -333,7 +373,7 @@ def _fetch_hk(ti) -> dict:
                 "debt_ratio": round(float(last.get("DEBT_ASSET_RATIO") or 0), 1),
                 "current_ratio": round(float(last.get("CURRENT_RATIO") or 0), 2),
                 "roic": round(float(last.get("ROIC_YEARLY") or 0), 2),
-                "fcf_margin": None,  # HK 年报未直接给 FCF margin
+                "ocf_to_ni": None,  # HK 年报未直接给 OCF / net income
             }
         except Exception:
             pass

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -84,17 +85,55 @@ def _is_playwright_pkg_installed() -> bool:
         return False
 
 
-def _is_chromium_installed() -> bool:
-    """检测 Playwright 的 Chromium 是否已下载（通过尝试取路径）."""
+def _chromium_executable_path() -> Path | None:
+    """Return a usable Chromium/Chrome executable for Playwright."""
     if not _is_playwright_pkg_installed():
-        return False
+        return None
+
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            exe = p.chromium.executable_path
-            return exe and Path(exe).exists()
+            exe = Path(p.chromium.executable_path)
+            if exe.exists():
+                return exe
     except Exception:
-        return False
+        pass
+
+    candidates: list[Path] = []
+    env_path = os.environ.get("UZI_CHROME_EXECUTABLE") or os.environ.get("CHROME_EXECUTABLE")
+    if env_path:
+        candidates.append(Path(env_path))
+
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidates.extend([
+            parent / "chrome-win64" / "chrome.exe",
+            parent / "chrome" / "chrome.exe",
+            parent / "chromium" / "chrome.exe",
+        ])
+
+    if sys.platform == "win32":
+        candidates.extend([
+            Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        ])
+    elif sys.platform == "darwin":
+        candidates.append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+    else:
+        for name in ("chromium-browser", "chromium", "google-chrome", "google-chrome-stable"):
+            found = shutil.which(name)
+            if found:
+                candidates.append(Path(found))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _is_chromium_installed() -> bool:
+    """检测 Playwright 可用的 Chromium/Chrome 是否存在."""
+    return _chromium_executable_path() is not None
 
 
 def _pip_install_playwright() -> bool:
@@ -221,7 +260,10 @@ def fetch_url(url: str, wait_for: str | None = None, timeout: int = DEFAULT_TIME
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            exe = _chromium_executable_path()
+            if not exe:
+                return None
+            browser = p.chromium.launch(headless=True, executable_path=str(exe))
             ctx = browser.new_context(user_agent=UA_PC, locale="zh-CN")
             page = ctx.new_page()
             page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")

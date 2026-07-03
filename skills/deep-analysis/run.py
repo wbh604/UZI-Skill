@@ -113,6 +113,31 @@ def detect_environment() -> dict:
     return env
 
 
+def _playwright_chromium_ready() -> bool:
+    """检测后台抓取用的 Playwright Chromium 是否可用。"""
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            return bool(p.chromium.executable_path)
+    except Exception:
+        return False
+
+
+def _format_browser_status(env: dict, no_browser: bool) -> str:
+    if no_browser:
+        return "后台模式（不自动打开报告；Playwright ✓）" if _playwright_chromium_ready() else "后台模式（不自动打开报告；Playwright 未就绪）"
+    if env["has_browser"]:
+        return "✓"
+    return "后台模式（无 GUI；Playwright ✓）" if _playwright_chromium_ready() else "后台模式（无 GUI；Playwright 未就绪）"
+
+
+def _format_cloudflare_status(has_cloudflared: bool, remote: bool) -> str:
+    if remote:
+        return "✓ 已安装" if has_cloudflared else "未安装（remote 模式需要）"
+    return "未启用（仅 --remote 需要）"
+
+
 # 国内 pypi 镜像按速度排序（清华通常最快；阿里云在清华故障时兜底）
 PYPI_MIRRORS = [
     ("清华大学", "https://pypi.tuna.tsinghua.edu.cn/simple"),
@@ -328,8 +353,8 @@ def main():
     print(f"🎯 游资（UZI）Skills v{_get_version()} · 深度分析引擎")
     print(f"   目标: {args.ticker}")
     print(f"   环境: {'Codex' if env['is_codex'] else 'Docker' if env['is_docker'] else 'SSH' if env['is_ssh'] else '本地'}")
-    print(f"   浏览器: {'✓' if env['has_browser'] and not args.no_browser else '✗ (headless)'}")
-    print(f"   Cloudflare: {'✓ 已安装' if env['has_cloudflared'] else '✗ 未安装'}")
+    print(f"   浏览器: {_format_browser_status(env, args.no_browser)}")
+    print(f"   Cloudflare: {_format_cloudflare_status(env['has_cloudflared'], args.remote)}")
     if args.remote:
         print(f"   远程模式: ✓ (完成后映射公网)")
     print("━" * 50)

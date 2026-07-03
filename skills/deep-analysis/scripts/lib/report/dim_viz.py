@@ -214,7 +214,7 @@ def _viz_financials(raw: dict) -> str:
         for k, label, max_v, good_high in [
             ("current_ratio", "流动比率", 3.0, True),
             ("debt_ratio", "资产负债率 %", 100, False),
-            ("fcf_margin", "现金流/净利 %", 150, True),
+            ("ocf_to_ni", "现金流/净利 %", 150, True),
             ("roic", "ROIC %", 30, True),
         ]:
             v = health.get(k)

@@ -135,9 +135,11 @@ def extract_features(raw: dict, dims: dict) -> dict:
     health = fin.get("financial_health") or {}
     f["current_ratio"] = _f(health.get("current_ratio"))
     f["debt_ratio"] = _f(health.get("debt_ratio"))
-    f["fcf_margin"] = _f(health.get("fcf_margin"))
+    f["ocf_to_ni"] = _f(health.get("ocf_to_ni"))
+    if f["ocf_to_ni"]:
+        f["ocf_to_net_income_ratio"] = f["ocf_to_ni"] / 100
     f["roic"] = _f(health.get("roic"))
-    f["fcf_positive"] = f["fcf_margin"] > 0
+    f["ocf_positive"] = f["ocf_to_ni"] > 0
 
     # v3.8.0 · DuPont 杜邦分解 · 暴露给评委/报告 (价值派看 ROE 质量来源)
     _dupont = fin.get("dupont") or {}

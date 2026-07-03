@@ -234,7 +234,7 @@ if __name__ == "__main__":
         "revenue_latest_yi": 52, "net_margin": 12.5, "pe": 35, "pb": 2.8,
         "total_debt_yi": 10, "cash_yi": 40, "fcf_latest_yi": 6.5,
         "ebitda_yi": 10, "equity_yi": 92, "name": "测试公司",
-        "roe_last": 11.8, "roe_5y_above_15": 0, "fcf_positive": True,
+        "roe_last": 11.8, "roe_5y_above_15": 0, "ocf_positive": True,
         "moat_total": 27, "stage_num": 2, "rev_growth_3y": 18,
         "eps_growth_3y": 15, "debt_ratio": 30, "gross_margin": 35,
     }
