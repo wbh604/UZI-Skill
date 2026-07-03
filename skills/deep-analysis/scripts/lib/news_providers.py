@@ -27,6 +27,7 @@ HTTP_TIMEOUT = int(os.environ.get("UZI_HTTP_TIMEOUT", "20"))
 CACHE_TTL_SEC = 600  # 10 min
 
 UA_PC = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+GENERIC_COMPANY_SUFFIXES = {"银行", "科技", "股份", "集团", "公司", "控股", "有限"}
 
 
 @dataclass
@@ -165,13 +166,14 @@ def fetch_em_kuaixun(limit: int = 30) -> list[NewsItem]:
 
 def fetch_em_stock_ann(stock_code: str = "", limit: int = 20) -> list[NewsItem]:
     """东财上市公司公告 JSON · A 股."""
-    key = f"em_ann_{stock_code or 'all'}"
+    key = f"em_ann_v2_{stock_code or 'all'}"
     cached = _cache_get(key)
     if cached is not None:
         return [NewsItem(**x) for x in cached[:limit]]
+    stock_param = f"&stock_list={stock_code}" if stock_code else ""
     url = (
         "https://np-anotice-stock.eastmoney.com/api/security/ann"
-        f"?sr=-1&page_size={limit}&page_index=1&ann_type=A&client_source=web"
+        f"?sr=-1&page_size={limit}&page_index=1&ann_type=A&client_source=web{stock_param}"
     )
     # 可扩展：按 stock_code 过滤 · 但 API 参数不稳定 · 先拉全量
     txt = _http_get(url, timeout=12)
@@ -257,7 +259,7 @@ def get_news_multi_source(
         if stock_name and len(stock_name) >= 2:
             # 派生简称
             keywords = [stock_name]
-            if len(stock_name) >= 3:
+            if len(stock_name) >= 3 and stock_name[-2:] not in GENERIC_COMPANY_SUFFIXES:
                 keywords.append(stock_name[-2:])
             items = [i for i in items
                      if any(k in i.title or k in i.body for k in keywords)]
