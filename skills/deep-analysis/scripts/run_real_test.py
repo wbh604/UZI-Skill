@@ -629,6 +629,36 @@ def stage1(ticker: str) -> dict:
     }
 
 
+def _validate_agent_analysis_or_fallback(agent_analysis: dict | None, ticker: str):
+    """Validate agent_analysis and discard structurally invalid payloads."""
+    if not agent_analysis:
+        return None, []
+    try:
+        from lib.agent_analysis_validator import validate as _validate_aa, format_issues as _fmt_aa
+        issues = _validate_aa(agent_analysis)
+        errs = [i for i in issues if i.severity == "error"]
+        if issues:
+            print("\n" + _fmt_aa(issues))
+            from pathlib import Path as _Path
+            err_path = _Path(".cache") / ticker / "_agent_analysis_errors.json"
+            err_path.parent.mkdir(parents=True, exist_ok=True)
+            err_path.write_text(
+                __import__("json").dumps(
+                    [{"severity": i.severity, "field": i.field, "message": i.message, "suggestion": i.suggestion} for i in issues],
+                    ensure_ascii=False, indent=2
+                ),
+                encoding="utf-8"
+            )
+            if errs:
+                print(f"   → 详细 issue 写入 {err_path}")
+                print(f"   → {len(errs)} 条结构性错误，已回退到脚本骨架；agent 应修正后重跑 stage2")
+                return None, issues
+        return agent_analysis, issues
+    except Exception as _ve:
+        print(f"   ⚠️ schema 校验跳过: {_ve}")
+        return agent_analysis, []
+
+
 def stage2(ticker: str) -> str:
     """Stage 2: 综合研判 + 报告组装。
 
@@ -651,29 +681,8 @@ def stage2(ticker: str) -> str:
     agent_analysis = read_task_output(ti.full, "agent_analysis")
 
     # v2.6 · 校验 agent_analysis schema（特别针对非 Claude 模型的输出）
-    if agent_analysis:
-        try:
-            from lib.agent_analysis_validator import validate as _validate_aa, format_issues as _fmt_aa
-            issues = _validate_aa(agent_analysis)
-            errs = [i for i in issues if i.severity == "error"]
-            if issues:
-                print("\n" + _fmt_aa(issues))
-                # 写错误清单 JSON 给 agent 复盘
-                from pathlib import Path as _Path
-                err_path = _Path(".cache") / ti.full / "_agent_analysis_errors.json"
-                err_path.parent.mkdir(parents=True, exist_ok=True)
-                err_path.write_text(
-                    __import__("json").dumps(
-                        [{"severity": i.severity, "field": i.field, "message": i.message, "suggestion": i.suggestion} for i in issues],
-                        ensure_ascii=False, indent=2
-                    ),
-                    encoding="utf-8"
-                )
-                if errs:
-                    print(f"   → 详细 issue 写入 {err_path}")
-                    print(f"   → {len(errs)} 条结构性错误，agent 应修正后重跑 stage2")
-        except Exception as _ve:
-            print(f"   ⚠️ schema 校验跳过: {_ve}")
+    # error 级结构问题不能继续 merge，否则 narrative_override/list 等坏结构会污染 synthesis。
+    agent_analysis, _agent_analysis_issues = _validate_agent_analysis_or_fallback(agent_analysis, ti.full)
 
     if agent_analysis and agent_analysis.get("agent_reviewed"):
         print(f"\n🧠 Agent 分析已加载 · agent_analysis.json")

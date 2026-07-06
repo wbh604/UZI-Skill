@@ -1,7 +1,7 @@
 ---
 name: deep-analysis
 description: 个股深度分析的核心工作流。当用户要求"深度分析 / 全面分析 / 帮我看看 / 值不值得买 / DCF / 机构建模 / 首次覆盖 / 投委会备忘录"等涉及个股研究的请求时触发。覆盖 A 股、港股、美股，产出 22 维数据 + 65 位大佬量化评审 + 6 种机构级估值建模 (DCF/Comps/LBO/3-Stmt/Merger) + 7 种研究产物 (首次覆盖/财报解读/催化剂日历/投资逻辑追踪/晨报/量化筛选/行业综述) + 6 种决策方法 (IC Memo/DD/Porter/单位经济/VCP/再平衡) + 杀猪盘检测，最终生成 Bloomberg 风格 HTML 报告 + 社交分享战报。关键词：股票、个股、深度分析、估值、DCF、comps、首次覆盖、IC memo、杀猪盘、龙虎榜、akshare。
-version: 3.9.1
+version: 3.9.2
 author: FloatFu-true
 license: MIT
 metadata:
@@ -937,6 +937,7 @@ python scripts/render_war_report.py {ticker}  # 战报 PNG
 # 在仓库根目录
 python run.py <股票代码>                   # 自动检测环境，无浏览器时给路径
 python run.py <股票代码> --remote          # 完成后启动 Cloudflare Tunnel，生成公网链接
+python run.py <股票代码> --remote --install-cloudflared  # 允许缺失 cloudflared 时自动安装
 python run.py <股票代码> --no-browser      # 强制不打开浏览器
 ```
 
@@ -946,6 +947,8 @@ python run.py <股票代码> --no-browser      # 强制不打开浏览器
 3. 调用 `cloudflared tunnel` 映射到 `https://xxx.trycloudflare.com`
 4. 输出公网链接 — 用户手机扫码 / 发微信就能看报告
 5. Ctrl+C 停止服务
+
+安全默认值：如果本机没有 `cloudflared`，`--remote` 只提示安装方式，不会自动执行 `brew install` / `sudo mv`。只有用户显式传 `--install-cloudflared` 时才允许自动安装。
 
 **Task 0 可选步骤：询问用户环境**
 

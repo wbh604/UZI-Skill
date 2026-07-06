@@ -131,7 +131,13 @@ def main(ticker: str) -> dict:
         ]
         return raw, tbl, cmp
 
-    if ti.market == "A" and industry:
+    if ti.market == "A" and not industry:
+        peer_table, peer_comparison = _build_self_only_table(ti, basic)
+        fallback_used = True
+        fallback_reason = "basic.industry 缺失 · 仅返回公司自身"
+        source_used += " (missing-industry self-only fallback)"
+
+    elif ti.market == "A" and industry:
         # ─── Tier 1: 主链（push2） ───
         try:
             df = ak.stock_board_industry_cons_em(symbol=industry)

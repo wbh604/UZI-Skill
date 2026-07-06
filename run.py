@@ -169,11 +169,14 @@ def check_dependencies():
 
 def serve_report(report_path: Path, port: int = 8976) -> HTTPServer:
     """启动 HTTP 服务器托管报告目录。"""
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Invalid HTTP port: {port}")
+
     report_dir = report_path.parent
     os.chdir(str(report_dir))
 
     handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(("0.0.0.0", port), handler)
+    httpd = HTTPServer(("127.0.0.1", port), handler)
 
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -184,14 +187,22 @@ def serve_report(report_path: Path, port: int = 8976) -> HTTPServer:
     return httpd
 
 
-def start_cloudflare_tunnel(port: int = 8976):
-    """启动 Cloudflare Tunnel，返回公网 URL。"""
+def start_cloudflare_tunnel(port: int = 8976, *, install: bool = False):
+    """启动 Cloudflare Tunnel，返回公网 URL 和进程。"""
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Invalid HTTP port: {port}")
+
     if not shutil.which("cloudflared"):
-        print("\n⚠️  未检测到 cloudflared，正在尝试安装...")
+        print("\n⚠️  未检测到 cloudflared。")
+        if not install:
+            print("   未执行自动安装；如需自动安装，请加 --install-cloudflared 后重试。")
+            print("   手动安装: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
+            return None, None
+        print("   --install-cloudflared 已开启，正在尝试安装...")
         if sys.platform == "win32":
             print("   请手动安装: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
             print("   或: winget install Cloudflare.cloudflared")
-            return None
+            return None, None
         elif sys.platform == "darwin":
             subprocess.run(["brew", "install", "cloudflared"], check=False)
         else:
@@ -202,13 +213,13 @@ def start_cloudflare_tunnel(port: int = 8976):
 
         if not shutil.which("cloudflared"):
             print("   ❌ cloudflared 安装失败，跳过远程映射")
-            return None
+            return None, None
         print("   ✓ cloudflared 安装成功")
 
     print(f"\n🌐 正在启动 Cloudflare Tunnel (端口 {port})...")
 
     proc = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
+        ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -232,11 +243,162 @@ def start_cloudflare_tunnel(port: int = 8976):
     if public_url:
         print(f"   ✅ 公网地址: {public_url}")
         print(f"   📱 手机扫码或发送链接即可查看报告")
+        print(f"   ⚠️  该链接是公网 bearer URL，仅分享给可信对象")
         print(f"   ⏹  按 Ctrl+C 停止服务")
     else:
         print(f"   ⚠️  Tunnel 启动中... 请检查 cloudflared 输出")
+        proc.terminate()
+        return None, None
 
-    return public_url
+    return public_url, proc
+
+
+def wait_for_remote_shutdown(httpd: HTTPServer, tunnel_proc=None) -> None:
+    """保持远程报告服务运行，直到用户中断，并清理本地服务/隧道进程。"""
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        print("\n⏹  服务已停止")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        if tunnel_proc and tunnel_proc.poll() is None:
+            tunnel_proc.terminate()
+            try:
+                tunnel_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                tunnel_proc.kill()
+
+
+def _normalize_report_path(path: str | Path, scripts_dir: Path = SCRIPTS_DIR) -> Path:
+    """Return an absolute report HTML path from runner output."""
+    p = Path(path)
+    return p if p.is_absolute() else (scripts_dir / p).resolve()
+
+
+def _set_direct_report_path(args, report_path: str | Path) -> None:
+    """Mark a generated non-single-stock report for shared post-processing."""
+    args._direct_report_path = _normalize_report_path(report_path)
+
+
+def _resolve_report_artifact(args, scripts_dir: Path, ticker: str) -> tuple[Path, Path]:
+    """Find the report directory and standalone HTML for any CLI mode."""
+    direct = getattr(args, "_direct_report_path", None) or getattr(args, "_fund_summary_path", None)
+    if direct:
+        standalone = _normalize_report_path(direct, scripts_dir)
+        return standalone.parent, standalone
+
+    from datetime import datetime
+    from lib.market_router import parse_ticker
+
+    ti = parse_ticker(ticker)
+    date = datetime.now().strftime("%Y%m%d")
+    report_dir = scripts_dir / "reports" / f"{ti.full}_{date}"
+    standalone = report_dir / "full-report-standalone.html"
+
+    if not standalone.exists():
+        reports_root = scripts_dir / "reports"
+        if reports_root.exists():
+            dirs = sorted(reports_root.glob(f"{ti.full}_*"), reverse=True)
+            for d in dirs:
+                candidate = d / "full-report-standalone.html"
+                if candidate.exists():
+                    return d, candidate
+    return report_dir, standalone
+
+
+def _post_process_report(args, env: dict, report_dir: Path, standalone: Path) -> None:
+    """Shared output/browser/remote handling for all report-producing modes."""
+    print(f"\n{'━' * 50}")
+    print(f"📄 报告路径: {standalone}")
+    print(f"   大小: {standalone.stat().st_size // 1024} KB")
+
+    # v2.11.0 · --output-dir：把报告整目录复制到指定路径，便于 SaaS / 平台集成
+    if args.output_dir:
+        import json
+        from datetime import datetime as _dt
+        out = Path(args.output_dir).resolve()
+        out.mkdir(parents=True, exist_ok=True)
+        try:
+            for item in report_dir.iterdir():
+                target = out / item.name
+                if item.is_dir():
+                    if target.exists():
+                        shutil.rmtree(target)
+                    shutil.copytree(item, target)
+                else:
+                    shutil.copy2(item, target)
+            index_target = out / "index.html"
+            shutil.copy2(standalone, index_target)
+
+            one_liner = ""
+            ol_path = report_dir / "one-liner.txt"
+            if ol_path.exists():
+                try:
+                    one_liner = ol_path.read_text(encoding="utf-8").strip()
+                except Exception:
+                    pass
+
+            meta = {
+                "schema": 1,
+                "ticker": args.ticker,
+                "depth": args.depth or os.environ.get("UZI_DEPTH") or "medium",
+                "generated_at": _dt.utcnow().isoformat() + "Z",
+                "report_dir": str(report_dir),
+                "standalone": standalone.name,
+                "index": "index.html",
+                "size_kb": standalone.stat().st_size // 1024,
+                "one_liner": one_liner,
+            }
+            (out / "report.meta.json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            print(f"   📦 已导出到: {out}/index.html")
+        except Exception as _e:
+            print(f"⚠️  --output-dir 导出失败（不影响本地报告）: {_e}")
+
+    # 打开浏览器（本地模式）
+    if env["has_browser"] and not args.no_browser and not args.remote:
+        import webbrowser
+        webbrowser.open(standalone.as_uri())
+        print(f"   🌐 已在浏览器中打开")
+
+    # 远程模式: HTTP server + Cloudflare Tunnel
+    if args.remote:
+        httpd = serve_report(standalone, args.port)
+        filename = standalone.name
+        public_url, tunnel_proc = start_cloudflare_tunnel(
+            args.port,
+            install=getattr(args, "install_cloudflared", False),
+        )
+
+        if public_url:
+            full_url = f"{public_url}/{filename}"
+            print(f"\n{'━' * 50}")
+            print(f"📱 远程查看地址:")
+            print(f"   {full_url}")
+            print(f"{'━' * 50}")
+            print(f"\n发送这个链接到手机就能看报告；不要转发到公开渠道。")
+            print(f"按 Ctrl+C 停止服务。\n")
+
+            # 如果有浏览器也打开
+            if env["has_browser"] and not args.no_browser:
+                import webbrowser
+                webbrowser.open(full_url)
+
+            wait_for_remote_shutdown(httpd, tunnel_proc)
+        else:
+            # cloudflared 失败，至少提供本地 HTTP
+            print(f"\n   本地访问: http://localhost:{args.port}/{filename}")
+            wait_for_remote_shutdown(httpd)
+    elif not env["has_browser"] or args.no_browser:
+        # 无浏览器环境，提示用户
+        print(f"\n💡 提示: 当前环境无法打开浏览器")
+        print(f"   方式 1: 下载文件到本地打开")
+        print(f"   方式 2: python run.py {args.ticker} --remote  ← 生成公网链接，手机就能看")
+
+    print(f"{'━' * 50}")
+    print(f"✅ 完成!")
 
 
 def _maybe_prompt_update() -> None:
@@ -279,6 +441,8 @@ def main():
                         help="股票代码或中文名 (如 600519.SH / AAPL / 贵州茅台)")
     parser.add_argument("--remote", action="store_true",
                         help="分析完后用 Cloudflare Tunnel 映射公网链接")
+    parser.add_argument("--install-cloudflared", action="store_true",
+                        help="远程模式缺少 cloudflared 时允许自动安装（默认只提示安装方式，不改系统）")
     parser.add_argument("--no-browser", action="store_true",
                         help="不自动打开浏览器")
     parser.add_argument("--port", type=int, default=8976,
@@ -302,6 +466,7 @@ def main():
     parser.add_argument("--output-dir", metavar="DIR", default=None,
                         help="v2.11.0 · SaaS 集成：把产出（standalone html + 图 + 摘要）拷贝到该目录，并在其中生成 index.html / report.meta.json。建议配合 --no-browser 使用。")
     args = parser.parse_args()
+    args._direct_report_path = None
 
     # v2.10.5 · run.py 是 CLI 直跑入口（agent 流程走 stage1/stage2 直接调用，不经 run.py）。
     # 设 UZI_CLI_ONLY=1 让 self_review 对 agent_analysis.json 缺失 / 低 coverage 做宽容处理
@@ -339,7 +504,7 @@ def main():
                          "H": "科技领袖派", "I": "Serenity · AI 卡位/瓶颈猎手"}
         print(f"🎯 已锁定 {args.school} 派视角 · {_SCHOOL_NAMES.get(args.school, args.school)} · 其他派评委 skip")
 
-    # v3.6.0 · 横向对比模式 · 早返回 · 不走单股分析
+    # v3.6.0 · 横向对比模式 · 不走单股分析，但仍进入统一 post-process
     if args.versus:
         if not (2 <= len(args.versus) <= 4):
             print(f"❌ --versus 接受 2-4 个 ticker · 实际 {len(args.versus)}")
@@ -348,25 +513,35 @@ def main():
         result = run_versus(
             args.versus,
             depth=args.depth or "lite",
-            auto_open=not args.no_browser,
+            auto_open=not args.no_browser and not args.remote,
         )
         if result.get("status") == "completed":
             print(f"✅ 横向对比完成 · {result['report_path']}")
+            _set_direct_report_path(args, result["report_path"])
+            args.ticker = "versus"
+            env = detect_environment()
+            report_dir, standalone = _resolve_report_artifact(args, SCRIPTS_DIR, args.ticker)
+            _post_process_report(args, env, report_dir, standalone)
             sys.exit(0)
         else:
             print(f"⚠️  横向对比未生成 · {result}")
             sys.exit(1)
 
-    # v3.6.0 · 组合批量分析 · 早返回
-    if args.portfolio:
+    # v3.6.0 · 组合批量分析 · 不走单股分析，但仍进入统一 post-process
+    if args.portfolio and not args._direct_report_path:
         from lib.portfolio_runner import run_portfolio
         result = run_portfolio(
             args.portfolio,
             depth=args.depth or "lite",
-            auto_open=not args.no_browser,
+            auto_open=not args.no_browser and not args.remote,
         )
         if result.get("status") == "completed":
             print(f"✅ 组合分析完成 · {result['report_path']}")
+            _set_direct_report_path(args, result["report_path"])
+            args.ticker = "portfolio"
+            env = detect_environment()
+            report_dir, standalone = _resolve_report_artifact(args, SCRIPTS_DIR, args.ticker)
+            _post_process_report(args, env, report_dir, standalone)
             sys.exit(0)
         else:
             print(f"⚠️  组合分析失败 · {result}")
@@ -461,13 +636,15 @@ def main():
                 )
                 if fund_result.get("status") == "completed":
                     print(f"\n✅ 持仓批量分析完成 · 汇总报告: {fund_result['summary_html']}")
-                sys.exit(0)
+                    _set_direct_report_path(args, fund_result["summary_html"])
+                else:
+                    sys.exit(0)
             print(f"\n{'━' * 50}")
             print(f"🔴 {args.ticker} 是 {stage1_result.get('label', '非个股标的')}，已跳过 stage2。")
             print(f"   请选择上面列出的成分股之一重跑。")
             print(f"{'━' * 50}")
             sys.exit(0)
-        if isinstance(stage1_result, dict) and stage1_result.get("status") == "name_not_resolved":
+        elif isinstance(stage1_result, dict) and stage1_result.get("status") == "name_not_resolved":
             cands = stage1_result.get("candidates", [])
             print(f"\n{'━' * 50}")
             print(f"❌ 无法确定股票: {args.ticker!r}")
@@ -529,14 +706,9 @@ def main():
                     )
                     if fund_result.get("status") == "completed":
                         print(f"\n✅ 持仓批量分析完成 · 汇总报告: {fund_result['summary_html']}")
-                        # 报告路径设为 summary html 让后续 cloudflare/browser 能打开
-                        from pathlib import Path as _P
-                        summary_path = _P(fund_result["summary_html"])
-                        if summary_path.is_absolute():
-                            args._fund_summary_path = summary_path
-                        else:
-                            args._fund_summary_path = (SCRIPTS_DIR / summary_path).resolve()
-                    sys.exit(0)
+                        _set_direct_report_path(args, fund_result["summary_html"])
+                    else:
+                        sys.exit(0)
                 else:
                     # 可转债 / 指数 / 拉不到持仓 · 仍 early-exit
                     print(f"🔴 {args.ticker} 是 {result.get('label', '非个股标的')}，已跳过 stage2。")
@@ -550,126 +722,13 @@ def main():
             sys.exit(0)
 
     # 找到生成的报告
-    from datetime import datetime
-    from lib.market_router import parse_ticker
-    ti = parse_ticker(args.ticker)
-    date = datetime.now().strftime("%Y%m%d")
-    report_dir = SCRIPTS_DIR / "reports" / f"{ti.full}_{date}"
-    standalone = report_dir / "full-report-standalone.html"
-
-    if not standalone.exists():
-        # 尝试找最新的报告
-        reports_root = SCRIPTS_DIR / "reports"
-        if reports_root.exists():
-            dirs = sorted(reports_root.glob(f"{ti.full}_*"), reverse=True)
-            for d in dirs:
-                candidate = d / "full-report-standalone.html"
-                if candidate.exists():
-                    standalone = candidate
-                    report_dir = d
-                    break
+    report_dir, standalone = _resolve_report_artifact(args, SCRIPTS_DIR, args.ticker)
 
     if not standalone.exists():
         print(f"\n❌ 报告文件未找到: {standalone}")
         return
 
-    print(f"\n{'━' * 50}")
-    print(f"📄 报告路径: {standalone}")
-    print(f"   大小: {standalone.stat().st_size // 1024} KB")
-
-    # v2.11.0 · --output-dir：把报告整目录复制到指定路径，便于 SaaS / 平台集成
-    if args.output_dir:
-        import json
-        from datetime import datetime as _dt
-        out = Path(args.output_dir).resolve()
-        out.mkdir(parents=True, exist_ok=True)
-        try:
-            for item in report_dir.iterdir():
-                target = out / item.name
-                if item.is_dir():
-                    if target.exists():
-                        shutil.rmtree(target)
-                    shutil.copytree(item, target)
-                else:
-                    shutil.copy2(item, target)
-            index_target = out / "index.html"
-            shutil.copy2(standalone, index_target)
-
-            one_liner = ""
-            ol_path = report_dir / "one-liner.txt"
-            if ol_path.exists():
-                try:
-                    one_liner = ol_path.read_text(encoding="utf-8").strip()
-                except Exception:
-                    pass
-
-            meta = {
-                "schema": 1,
-                "ticker": args.ticker,
-                "depth": args.depth or os.environ.get("UZI_DEPTH") or "medium",
-                "generated_at": _dt.utcnow().isoformat() + "Z",
-                "report_dir": str(report_dir),
-                "standalone": standalone.name,
-                "index": "index.html",
-                "size_kb": standalone.stat().st_size // 1024,
-                "one_liner": one_liner,
-            }
-            (out / "report.meta.json").write_text(
-                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            print(f"   📦 已导出到: {out}/index.html")
-        except Exception as _e:
-            print(f"⚠️  --output-dir 导出失败（不影响本地报告）: {_e}")
-
-    # 打开浏览器（本地模式）
-    if env["has_browser"] and not args.no_browser and not args.remote:
-        import webbrowser
-        webbrowser.open(standalone.as_uri())
-        print(f"   🌐 已在浏览器中打开")
-
-    # 远程模式: HTTP server + Cloudflare Tunnel
-    if args.remote:
-        httpd = serve_report(standalone, args.port)
-        filename = standalone.name
-        public_url = start_cloudflare_tunnel(args.port)
-
-        if public_url:
-            full_url = f"{public_url}/{filename}"
-            print(f"\n{'━' * 50}")
-            print(f"📱 远程查看地址:")
-            print(f"   {full_url}")
-            print(f"{'━' * 50}")
-            print(f"\n发送这个链接到手机就能看报告。")
-            print(f"按 Ctrl+C 停止服务。\n")
-
-            # 如果有浏览器也打开
-            if env["has_browser"] and not args.no_browser:
-                import webbrowser
-                webbrowser.open(full_url)
-
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print("\n⏹  服务已停止")
-                httpd.shutdown()
-        else:
-            # cloudflared 失败，至少提供本地 HTTP
-            print(f"\n   本地访问: http://localhost:{args.port}/{filename}")
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print("\n⏹  服务已停止")
-                httpd.shutdown()
-    elif not env["has_browser"] or args.no_browser:
-        # 无浏览器环境，提示用户
-        print(f"\n💡 提示: 当前环境无法打开浏览器")
-        print(f"   方式 1: 下载文件到本地打开")
-        print(f"   方式 2: python run.py {args.ticker} --remote  ← 生成公网链接，手机就能看")
-
-    print(f"{'━' * 50}")
-    print(f"✅ 完成!")
+    _post_process_report(args, env, report_dir, standalone)
 
 
 if __name__ == "__main__":

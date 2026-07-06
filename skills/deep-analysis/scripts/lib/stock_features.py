@@ -136,6 +136,10 @@ def extract_features(raw: dict, dims: dict) -> dict:
     f["current_ratio"] = _f(health.get("current_ratio"))
     f["debt_ratio"] = _f(health.get("debt_ratio"))
     f["fcf_margin"] = _f(health.get("fcf_margin"))
+    f["ocf_to_net_income_ratio"] = _f(
+        fin.get("ocf_to_net_income_ratio") or health.get("ocf_to_net_income_ratio"),
+        default=0,
+    )
     f["roic"] = _f(health.get("roic"))
     f["fcf_positive"] = f["fcf_margin"] > 0
 

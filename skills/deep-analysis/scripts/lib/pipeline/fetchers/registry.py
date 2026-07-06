@@ -86,7 +86,10 @@ FETCHER_REGISTRY: dict[str, type] = {
         dim_key="1_financials",
         legacy_module="fetch_financials",
         required=["roe", "net_margin"],
-        optional=["gross_margin", "debt_ratio", "revenue_growth", "current_ratio", "asset_liability_ratio"],
+        optional=[
+            "gross_margin", "revenue_growth", "financial_health",
+            "ocf", "ocf_history", "ocf_to_net_income_ratio",
+        ],
         args_fn=lambda t, r: (t,),
     ),
 
@@ -181,7 +184,7 @@ FETCHER_REGISTRY: dict[str, type] = {
         dim_key="10_valuation",
         legacy_module="fetch_valuation",
         required=[],
-        optional=["pe_ttm", "pb", "ps_ttm", "pe_percentile", "pb_percentile", "dividend_yield"],
+        optional=["pe", "pb", "pe_quantile", "pb_quantile", "industry_pe", "dcf"],
         args_fn=lambda t, r: (t,),
     ),
 

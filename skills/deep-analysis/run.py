@@ -169,11 +169,14 @@ def check_dependencies():
 
 def serve_report(report_path: Path, port: int = 8976) -> HTTPServer:
     """启动 HTTP 服务器托管报告目录。"""
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Invalid HTTP port: {port}")
+
     report_dir = report_path.parent
     os.chdir(str(report_dir))
 
     handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(("0.0.0.0", port), handler)
+    httpd = HTTPServer(("127.0.0.1", port), handler)
 
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -184,14 +187,22 @@ def serve_report(report_path: Path, port: int = 8976) -> HTTPServer:
     return httpd
 
 
-def start_cloudflare_tunnel(port: int = 8976):
-    """启动 Cloudflare Tunnel，返回公网 URL。"""
+def start_cloudflare_tunnel(port: int = 8976, *, install: bool = False):
+    """启动 Cloudflare Tunnel，返回公网 URL 和进程。"""
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Invalid HTTP port: {port}")
+
     if not shutil.which("cloudflared"):
-        print("\n⚠️  未检测到 cloudflared，正在尝试安装...")
+        print("\n⚠️  未检测到 cloudflared。")
+        if not install:
+            print("   未执行自动安装；如需自动安装，请加 --install-cloudflared 后重试。")
+            print("   手动安装: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
+            return None, None
+        print("   --install-cloudflared 已开启，正在尝试安装...")
         if sys.platform == "win32":
             print("   请手动安装: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
             print("   或: winget install Cloudflare.cloudflared")
-            return None
+            return None, None
         elif sys.platform == "darwin":
             subprocess.run(["brew", "install", "cloudflared"], check=False)
         else:
@@ -202,13 +213,13 @@ def start_cloudflare_tunnel(port: int = 8976):
 
         if not shutil.which("cloudflared"):
             print("   ❌ cloudflared 安装失败，跳过远程映射")
-            return None
+            return None, None
         print("   ✓ cloudflared 安装成功")
 
     print(f"\n🌐 正在启动 Cloudflare Tunnel (端口 {port})...")
 
     proc = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
+        ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -232,11 +243,31 @@ def start_cloudflare_tunnel(port: int = 8976):
     if public_url:
         print(f"   ✅ 公网地址: {public_url}")
         print(f"   📱 手机扫码或发送链接即可查看报告")
+        print(f"   ⚠️  该链接是公网 bearer URL，仅分享给可信对象")
         print(f"   ⏹  按 Ctrl+C 停止服务")
     else:
         print(f"   ⚠️  Tunnel 启动中... 请检查 cloudflared 输出")
+        proc.terminate()
+        return None, None
 
-    return public_url
+    return public_url, proc
+
+
+def wait_for_remote_shutdown(httpd: HTTPServer, tunnel_proc=None) -> None:
+    """保持远程报告服务运行，直到用户中断，并清理本地服务/隧道进程。"""
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        print("\n⏹  服务已停止")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        if tunnel_proc and tunnel_proc.poll() is None:
+            tunnel_proc.terminate()
+            try:
+                tunnel_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                tunnel_proc.kill()
 
 
 def _maybe_prompt_update() -> None:
@@ -279,6 +310,8 @@ def main():
                         help="股票代码或中文名 (如 600519.SH / AAPL / 贵州茅台)")
     parser.add_argument("--remote", action="store_true",
                         help="分析完后用 Cloudflare Tunnel 映射公网链接")
+    parser.add_argument("--install-cloudflared", action="store_true",
+                        help="远程模式缺少 cloudflared 时允许自动安装（默认只提示安装方式，不改系统）")
     parser.add_argument("--no-browser", action="store_true",
                         help="不自动打开浏览器")
     parser.add_argument("--port", type=int, default=8976,
@@ -494,7 +527,7 @@ def main():
     if args.remote:
         httpd = serve_report(standalone, args.port)
         filename = standalone.name
-        public_url = start_cloudflare_tunnel(args.port)
+        public_url, tunnel_proc = start_cloudflare_tunnel(args.port, install=args.install_cloudflared)
 
         if public_url:
             full_url = f"{public_url}/{filename}"
@@ -502,7 +535,7 @@ def main():
             print(f"📱 远程查看地址:")
             print(f"   {full_url}")
             print(f"{'━' * 50}")
-            print(f"\n发送这个链接到手机就能看报告。")
+            print(f"\n发送这个链接到手机就能看报告；不要转发到公开渠道。")
             print(f"按 Ctrl+C 停止服务。\n")
 
             # 如果有浏览器也打开
@@ -510,21 +543,11 @@ def main():
                 import webbrowser
                 webbrowser.open(full_url)
 
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print("\n⏹  服务已停止")
-                httpd.shutdown()
+            wait_for_remote_shutdown(httpd, tunnel_proc)
         else:
             # cloudflared 失败，至少提供本地 HTTP
             print(f"\n   本地访问: http://localhost:{args.port}/{filename}")
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print("\n⏹  服务已停止")
-                httpd.shutdown()
+            wait_for_remote_shutdown(httpd)
     elif not env["has_browser"] or args.no_browser:
         # 无浏览器环境，提示用户
         print(f"\n💡 提示: 当前环境无法打开浏览器")

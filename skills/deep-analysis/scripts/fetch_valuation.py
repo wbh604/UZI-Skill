@@ -11,6 +11,25 @@ from lib import data_sources as ds
 from lib.market_router import parse_ticker
 
 
+def _find_weighted_pe_col(df) -> str | None:
+    return next((c for c in df.columns if "市盈率" in c and "加权" in c), None)
+
+
+def _market_weighted_pe(df) -> float | None:
+    pe_col = _find_weighted_pe_col(df)
+    if not pe_col:
+        return None
+    vals = []
+    for v in df[pe_col].tolist():
+        try:
+            pe = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 0 < pe < 500:
+            vals.append(pe)
+    return round(sum(vals) / len(vals), 2) if vals else None
+
+
 def simple_dcf(
     fcf_latest: float,
     growth_5y: float = 0.10,
@@ -74,6 +93,7 @@ def main(ticker: str) -> dict:
     pe_quantile_val = None
     pb_quantile_val = None
     industry_pe_avg = None
+    industry_pe_fallback_reason = ""
 
     if ti.market == "A":
         # 1. PE 5 年历史序列 via 百度股市通 (stock_zh_valuation_baidu)
@@ -121,9 +141,21 @@ def main(ticker: str) -> dict:
                         from lib.industry_mapping import resolve_csrc_industry as _resolve
                         row = _resolve(ind_name, df) if ind_name else None
                         if row is not None:
-                            pe_col = next((c for c in df.columns if "市盈率" in c and "加权" in c), None)
+                            pe_col = _find_weighted_pe_col(df)
                             if pe_col:
                                 industry_pe_avg = round(float(row[pe_col]), 2)
+                                break
+                        elif not ind_name:
+                            market_pe = _market_weighted_pe(df)
+                            if market_pe is not None:
+                                industry_pe_avg = market_pe
+                                industry_pe_fallback_reason = "basic.industry 缺失 · 使用 cninfo 市场加权均值"
+                                break
+                        else:
+                            market_pe = _market_weighted_pe(df)
+                            if market_pe is not None:
+                                industry_pe_avg = market_pe
+                                industry_pe_fallback_reason = f"行业 {ind_name} 未匹配 · 使用 cninfo 市场加权均值"
                                 break
                 except Exception:
                     continue
@@ -188,6 +220,7 @@ def main(ticker: str) -> dict:
             "pe_quantile": f"5 年 {pe_quantile_val:.0f} 分位" if pe_quantile_val is not None else "—",
             "pb_quantile": f"{pb_quantile_val:.0f}%" if pb_quantile_val is not None else "—",
             "industry_pe": str(industry_pe_avg) if industry_pe_avg else "—",
+            "industry_pe_fallback_reason": industry_pe_fallback_reason,
             "dcf": dcf_display,
             "pe_history": pe_history,
             "dcf_simple": dcf_result,

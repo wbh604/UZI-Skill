@@ -44,6 +44,35 @@ def _to_yi(v) -> float:
     return round(n / 1e8, 2)
 
 
+def _apply_operating_cash_flow(out: dict, df_cf) -> None:
+    """Attach operating cash-flow fields using 亿 units.
+
+    This is OCF, not true FCF. Keep the naming explicit so trap-detector and
+    investor rules can judge cash-profit matching without mistaking it for
+    free cash flow after capex.
+    """
+    if df_cf is None or df_cf.empty or "经营活动产生的现金流量净额" not in df_cf.columns:
+        return
+
+    ocf_history = [_to_yi(v) for v in df_cf["经营活动产生的现金流量净额"].tolist()]
+    ocf_history = [v for v in ocf_history if v != 0]
+    if not ocf_history:
+        return
+
+    ocf_latest = ocf_history[0]
+    out["ocf"] = f"{ocf_latest:.1f}亿"
+    out["operating_cash_flow"] = out["ocf"]
+    out["operating_cash_flow_yi"] = round(ocf_latest, 2)
+    out["ocf_history"] = ocf_history[:6]
+
+    np_latest = (out.get("net_profit_history") or [0])[-1]
+    if np_latest:
+        ratio = round(ocf_latest / np_latest, 2)
+        out["ocf_to_net_income_ratio"] = ratio
+        out.setdefault("financial_health", {})["ocf_to_net_income_ratio"] = ratio
+        out.setdefault("financial_health", {})["fcf_margin"] = round(ratio * 100, 1)
+
+
 def _fetch_a_share(ti) -> dict:
     out: dict = {}
     code = ti.code
@@ -149,20 +178,12 @@ def _fetch_a_share(ti) -> dict:
     except Exception:
         pass
 
-    # ─── 4. 现金流 (FCF 占净利比)
+    # ─── 4. 现金流 (经营现金流/净利)
     try:
         df_cf = ak.stock_cash_flow_sheet_by_report_em(symbol=f"{'SZ' if ti.full.endswith('SZ') else 'SH'}{code}")
-        if df_cf is not None and not df_cf.empty:
-            # 最近一期 经营性现金流
-            if "经营活动产生的现金流量净额" in df_cf.columns:
-                ocf = _to_float(df_cf["经营活动产生的现金流量净额"].iloc[0])
-                out["fcf"] = f"{ocf / 1e8:.1f}亿"
-                # ocf/np
-                np_latest = (out.get("net_profit_history") or [0])[-1]
-                if np_latest:
-                    out.setdefault("financial_health", {})["fcf_margin"] = round(ocf / 1e8 / np_latest * 100, 1)
-    except Exception:
-        pass
+        _apply_operating_cash_flow(out, df_cf)
+    except Exception as e:
+        out["_cash_flow_error"] = str(e)
 
     # ─── 5. 分红历史
     try:
