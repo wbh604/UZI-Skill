@@ -14,7 +14,9 @@ v2.15.3 (#30) · 大宗交易 + 解禁数据走 ds.cached module-level · 避免
 import json
 import os
 import sys
+import time
 
+import lib.net_timeout_guard  # noqa: F401 - timeout + proxy routing
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
 from lib.cache import cached  # v2.15.3 · TTL cache
@@ -28,8 +30,70 @@ def _safe(fn, default):
         return {"error": str(e)} if isinstance(default, dict) else default
 
 
+def _to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_main_fund_flow_http(ti) -> list:
+    """Direct Eastmoney HTTP path for per-stock main fund flow."""
+    import requests
+
+    market_map = {"SH": 1, "SZ": 0, "BJ": 0}
+    market_id = market_map.get(ti.full[-2:].upper(), 1)
+    params = {
+        "lmt": "0",
+        "klt": "101",
+        "secid": f"{market_id}.{ti.code}",
+        "fields1": "f1,f2,f3,f7",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+        "ut": "b2884a393a59ad64002292a3e90d46a5",
+        "_": int(time.time() * 1000),
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        "Referer": "https://data.eastmoney.com/",
+    }
+    session = requests.Session()
+    session.trust_env = False
+    r = session.get(
+        "http://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+        params=params,
+        headers=headers,
+        timeout=int(os.environ.get("UZI_HTTP_TIMEOUT", "8")),
+    )
+    r.raise_for_status()
+    klines = (((r.json() or {}).get("data") or {}).get("klines") or [])
+    rows = []
+    for line in klines[-20:]:
+        parts = str(line).split(",")
+        if len(parts) < 13:
+            continue
+        rows.append({
+            "日期": parts[0],
+            "收盘价": _to_float(parts[11]),
+            "涨跌幅": _to_float(parts[12]),
+            "主力净流入-净额": _to_float(parts[1]),
+            "主力净流入-净占比": _to_float(parts[6]),
+            "超大单净流入-净额": _to_float(parts[5]),
+            "超大单净流入-净占比": _to_float(parts[10]),
+            "大单净流入-净额": _to_float(parts[4]),
+            "大单净流入-净占比": _to_float(parts[9]),
+            "中单净流入-净额": _to_float(parts[3]),
+            "中单净流入-净占比": _to_float(parts[8]),
+            "小单净流入-净额": _to_float(parts[2]),
+            "小单净流入-净占比": _to_float(parts[7]),
+        })
+    return rows
+
+
 def _fetch_main_fund_flow(ti) -> list:
     """Fast per-stock Eastmoney fund-flow path; safe to run in quick mode."""
+    direct = _safe(lambda: _fetch_main_fund_flow_http(ti), [])
+    if direct:
+        return direct
     return _safe(
         lambda: ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower()).tail(20).to_dict("records"),
         [],
@@ -37,6 +101,12 @@ def _fetch_main_fund_flow(ti) -> list:
 
 
 def _main_net_value(row: dict) -> float:
+    for key in ("主力净流入-净额", "主力净流入", "主力资金净流入", "主力净额"):
+        if key in row:
+            try:
+                return float(row.get(key) or 0)
+            except (ValueError, TypeError):
+                return 0.0
     for key in ("主力净流入-净额", "主力净流入", "主力资金净流入", "主力净额"):
         if key in row:
             try:
@@ -183,7 +253,7 @@ def main(ticker: str) -> dict:
                 "_skipped_universe_heavy": True,
                 "_note": "资金面重型接口默认跳过；如需大宗/解禁/机构持仓全市场数据，设置 UZI_CAPITAL_FLOW_HEAVY=1 后重跑。",
             },
-            "source": "capital_flow:quick + akshare:stock_individual_fund_flow",
+            "source": "capital_flow:quick + eastmoney:http_push2his + akshare:stock_individual_fund_flow",
             "fallback": False,
         }
 

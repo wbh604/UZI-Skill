@@ -26,6 +26,7 @@ def test_quick_mode_fetches_individual_main_flow(monkeypatch):
     def fail_universe(*args, **kwargs):
         raise AssertionError("quick mode must not call universe-heavy fetchers")
 
+    monkeypatch.setattr(fcf, "_fetch_main_fund_flow_http", lambda _ti: [])
     monkeypatch.setattr(fcf.ak, "stock_individual_fund_flow", fake_fund_flow)
     monkeypatch.setattr(fcf, "_universe_dzjy", fail_universe)
     monkeypatch.setattr(fcf, "_universe_release_summary", fail_universe)

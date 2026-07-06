@@ -32,6 +32,12 @@ def install_default_timeout() -> None:
         return
 
     try:
+        from lib.net_proxy_router import configure_proxy_routing
+        configure_proxy_routing()
+    except Exception:
+        pass
+
+    try:
         import requests
         from requests.sessions import Session
     except ImportError:

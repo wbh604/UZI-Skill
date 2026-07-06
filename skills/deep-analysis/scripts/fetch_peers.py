@@ -35,7 +35,6 @@ def _format_pb(v) -> str:
 
 
 def _build_self_only_table(ti, basic: dict) -> tuple[list, list]:
-    """Tier 4 fallback: return at least the company itself."""
     self_row = {
         "name": basic.get("name") or ti.full,
         "code": ti.full,
@@ -83,12 +82,14 @@ STATIC_A_SHARE_PEERS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+EASTMONEY_INDUSTRY_BOARD_CODES = {
+    "银行": "BK0475",
+}
+
 
 def _static_peer_seed(industry: str) -> list[tuple[str, str]]:
-    if not industry:
-        return []
     for key, rows in STATIC_A_SHARE_PEERS.items():
-        if key in industry:
+        if key in (industry or ""):
             return rows
     return []
 
@@ -101,14 +102,14 @@ def _build_static_peer_table(ti, basic: dict, industry: str) -> tuple[list, list
     code_to_name = {code: name for code, name in rows}
     code_to_name[ti.full] = basic.get("name") or code_to_name.get(ti.full) or ti.full
 
-    ordered_codes = [ti.full] + [code for code, _ in rows if code != ti.full]
     table = []
     raw = []
-    for code in ordered_codes[:6]:
+    for code in [ti.full] + [code for code, _ in rows if code != ti.full]:
+        if len(table) >= 6:
+            break
         is_self = code == ti.full
-        name = code_to_name.get(code, code)
         row = {
-            "name": name,
+            "name": code_to_name.get(code, code),
             "code": code,
             "pe": _format_pe(basic.get("pe_ttm")) if is_self else DASH,
             "pb": _format_pb(basic.get("pb")) if is_self else DASH,
@@ -127,6 +128,46 @@ def _build_static_peer_table(ti, basic: dict, industry: str) -> tuple[list, list
     return raw, table, comparison
 
 
+def _eastmoney_industry_cons_direct(industry: str):
+    board_code = next((code for key, code in EASTMONEY_INDUSTRY_BOARD_CODES.items() if key in (industry or "")), "")
+    if not board_code:
+        return None
+
+    import pandas as pd
+    import requests
+
+    session = requests.Session()
+    session.trust_env = False
+    params = {
+        "pn": "1",
+        "pz": "100",
+        "po": "1",
+        "np": "1",
+        "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+        "fltt": "2",
+        "invt": "2",
+        "fid": "f3",
+        "fs": f"b:{board_code} f:!50",
+        "fields": "f12,f14,f20,f9,f23",
+    }
+    headers = {"User-Agent": "Mozilla/5.0"}
+    timeout = int(os.environ.get("UZI_HTTP_TIMEOUT", "8"))
+    r = session.get("https://29.push2.eastmoney.com/api/qt/clist/get", params=params, headers=headers, timeout=timeout)
+    r.raise_for_status()
+    diff = ((r.json() or {}).get("data") or {}).get("diff") or []
+    rows = [
+        {
+            "代码": str(item.get("f12", "")),
+            "名称": item.get("f14", ""),
+            "总市值": item.get("f20"),
+            "市盈率-动态": item.get("f9"),
+            "市净率": item.get("f23"),
+        }
+        for item in diff
+    ]
+    return pd.DataFrame(rows)
+
+
 def _first(row: dict, keys: tuple[str, ...], default=""):
     for key in keys:
         if key in row:
@@ -135,9 +176,8 @@ def _first(row: dict, keys: tuple[str, ...], default=""):
 
 
 def _parse_peer_df(df, basic: dict, self_code: str, self_full: str):
-    """Shared parser: DataFrame -> (peers_raw, peer_table, peer_comparison)."""
     df = df.copy()
-    mcap_col = next((c for c in ("总市值", "总市值 ", "市值", "鎬诲競鍊?") if c in df.columns), None)
+    mcap_col = next((c for c in ("总市值", "市值", "鎬诲競鍊?") if c in df.columns), None)
     if mcap_col:
         df["_mcap"] = df[mcap_col].apply(_float)
         df = df.sort_values("_mcap", ascending=False)
@@ -189,13 +229,10 @@ def main(ticker: str) -> dict:
     peer_comparison: list = []
 
     if ti.market == "H":
-        try:
-            ranks = basic.get("_ranks") or {}
-            val = ranks.get("valuation") or {}
-            scale = ranks.get("scale") or {}
-            growth = ranks.get("growth") or {}
-        except Exception:
-            val, scale, growth = {}, {}, {}
+        ranks = basic.get("_ranks") or {}
+        val = ranks.get("valuation") or {}
+        scale = ranks.get("scale") or {}
+        growth = ranks.get("growth") or {}
         self_row = {
             "name": basic.get("name") or ti.full,
             "code": ti.full,
@@ -230,26 +267,29 @@ def main(ticker: str) -> dict:
     source_used = "akshare:stock_board_industry_cons_em"
 
     if ti.market == "A" and industry:
-        # Tier 0: local static fallback. This is the default path because Eastmoney push2
-        # can hang behind some proxies; set UZI_PEERS_TRY_AK=1 to use the network source.
-        peers_raw, peer_table, peer_comparison = _build_static_peer_table(ti, basic, industry)
-        if peer_table:
-            fallback_used = True
-            fallback_reason = "akshare push2 默认关闭；使用本地静态同行兜底"
-            source_used = "local_static_peers"
-
-        # Tier 1: primary push2 source, explicit opt-in only.
-        if not peer_table and os.environ.get("UZI_PEERS_TRY_AK") == "1":
+        # Tier 1: direct Eastmoney 29.push2 path, opt-in via UZI_PEERS_TRY_AK=1.
+        if os.environ.get("UZI_PEERS_TRY_AK") == "1":
             try:
-                df = ak.stock_board_industry_cons_em(symbol=industry)
+                df = _eastmoney_industry_cons_direct(industry)
                 if df is not None and not df.empty:
                     peers_raw, peer_table, peer_comparison = _parse_peer_df(df, basic, ti.code, ti.full)
                     fallback_used = False
-                    source_used = "akshare:stock_board_industry_cons_em"
+                    source_used = "eastmoney:29.push2.clist"
             except Exception as e:
-                peers_raw = [{"tier": 1, "error": f"{type(e).__name__}: {str(e)[:200]}"}]
+                peers_raw = [{"tier": 1, "source": "eastmoney:29.push2", "error": f"{type(e).__name__}: {str(e)[:200]}"}]
 
-            # Tier 2: retry once for transient network failures.
+            # Tier 2: akshare wrapper path, also opt-in.
+            if not peer_table:
+                try:
+                    df = ak.stock_board_industry_cons_em(symbol=industry)
+                    if df is not None and not df.empty:
+                        peers_raw, peer_table, peer_comparison = _parse_peer_df(df, basic, ti.code, ti.full)
+                        fallback_used = False
+                        source_used = "akshare:stock_board_industry_cons_em"
+                except Exception as e:
+                    peers_raw.append({"tier": 2, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+
+            # Tier 2 retry: one retry for transient akshare failures.
             if not peer_table:
                 try:
                     time.sleep(2.5)
@@ -257,14 +297,21 @@ def main(ticker: str) -> dict:
                     if df is not None and not df.empty:
                         peers_raw, peer_table, peer_comparison = _parse_peer_df(df, basic, ti.code, ti.full)
                         fallback_used = True
-                        fallback_reason = "Tier 1 网络失败；Tier 2 retry 成功"
+                        fallback_reason = "Tier 2 retry 成功"
                         source_used = "akshare:stock_board_industry_cons_em (retry)"
                 except Exception as e:
-                    peers_raw.append({"tier": 2, "error": f"{type(e).__name__}: {str(e)[:200]}"})
-        elif not peer_table:
-            peers_raw.append({"tier": 1, "skipped": "set UZI_PEERS_TRY_AK=1 to enable Eastmoney push2"})
+                    peers_raw.append({"tier": 3, "error": f"{type(e).__name__}: {str(e)[:200]}"})
 
-        # Tier 3: Xueqiu Playwright login fallback, still opt-in via UZI_XQ_LOGIN=1.
+        # Tier 3: Xueqiu Playwright login fallback.
+        if not peer_table:
+            peers_raw, peer_table, peer_comparison = _build_static_peer_table(ti, basic, industry)
+            if peer_table:
+                fallback_used = True
+                fallback_reason = "实时同行源未启用或失败；使用本地静态同行兜底"
+                source_used = "local_static_peers"
+            elif os.environ.get("UZI_PEERS_TRY_AK") != "1":
+                peers_raw.append({"tier": 1, "skipped": "set UZI_PEERS_TRY_AK=1 to enable Eastmoney push2"})
+
         if not peer_table:
             try:
                 from lib.xueqiu_browser import fetch_peers_via_browser, is_login_enabled
@@ -289,9 +336,8 @@ def main(ticker: str) -> dict:
                             fallback_reason = "akshare 不可用；Tier 3 雪球浏览器兜底成功"
                             source_used = f"xueqiu.com/S/{ti.code} (playwright)"
             except Exception as e:
-                peers_raw.append({"tier": 3, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+                peers_raw.append({"tier": 4, "error": f"{type(e).__name__}: {str(e)[:200]}"})
 
-        # Tier 4: self-only final fallback.
         if not peer_table:
             peer_table, peer_comparison = _build_self_only_table(ti, basic)
             fallback_used = True
