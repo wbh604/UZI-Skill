@@ -189,7 +189,7 @@ def score_dimensions(raw: dict) -> dict:
     main_flow = cap.get("main_fund_flow_20d") or []
     main_5d_net = 0
     if main_flow:
-        for rec in main_flow[:5]:
+        for rec in main_flow[-5:]:
             v = rec.get("主力净流入-净额", 0) if isinstance(rec, dict) else 0
             try:
                 main_5d_net += float(v)
