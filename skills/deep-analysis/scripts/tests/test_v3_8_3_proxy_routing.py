@@ -31,7 +31,7 @@ def test_proxy_router_auto_uses_local_proxy_and_bypasses_domestic(monkeypatch):
     assert router.os.environ["HTTP_PROXY"] == "http://127.0.0.1:7897"
     assert router.os.environ["HTTPS_PROXY"] == "http://127.0.0.1:7897"
     no_proxy = router.os.environ["NO_PROXY"]
-    for domain in ("eastmoney.com", ".eastmoney.com", "cninfo.com.cn", "xueqiu.com", "localhost", "127.0.0.1"):
+    for domain in ("eastmoney.com", ".eastmoney.com", "sina.com.cn", ".sina.com.cn", "cninfo.com.cn", "xueqiu.com", "localhost", "127.0.0.1"):
         assert domain in no_proxy
 
 

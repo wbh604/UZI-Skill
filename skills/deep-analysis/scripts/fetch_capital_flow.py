@@ -85,15 +85,79 @@ def _fetch_main_fund_flow_http(ti) -> list:
             "中单净流入-净占比": _to_float(parts[8]),
             "小单净流入-净额": _to_float(parts[2]),
             "小单净流入-净占比": _to_float(parts[7]),
+            "_source": "eastmoney:push2his.fflow.daykline",
+        })
+    return rows
+
+
+def _sina_moneyflow_symbol(ti) -> str:
+    market = ti.full[-2:].upper()
+    prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}.get(market, "sh")
+    return f"{prefix}{ti.code}"
+
+
+def _ratio_to_pct(value):
+    parsed = _to_float(value)
+    return parsed * 100 if parsed is not None else None
+
+
+def _fetch_main_fund_flow_sina(ti) -> list:
+    """Sina per-stock moneyflow history; independent of Eastmoney push2his."""
+    import requests
+
+    params = {
+        "page": 1,
+        "num": 20,
+        "sort": "opendate",
+        "asc": 0,
+        "daima": _sina_moneyflow_symbol(ti),
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        "Referer": "https://vip.stock.finance.sina.com.cn/moneyflow/",
+    }
+    session = requests.Session()
+    session.trust_env = False
+    r = session.get(
+        "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_qsfx_zjlrqs",
+        params=params,
+        headers=headers,
+        timeout=int(os.environ.get("UZI_HTTP_TIMEOUT", "8")),
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if not isinstance(payload, list):
+        return []
+
+    rows = []
+    for item in reversed(payload[:20]):
+        main_net = _to_float(item.get("r0_net"))
+        rows.append({
+            "日期": item.get("opendate"),
+            "收盘价": _to_float(item.get("trade")),
+            "涨跌幅": _ratio_to_pct(item.get("changeratio")),
+            "换手率": _to_float(item.get("turnover")),
+            "净流入-净额": _to_float(item.get("netamount")),
+            "净流入-净占比": _ratio_to_pct(item.get("ratioamount")),
+            "主力净流入-净额": main_net,
+            "主力净流入": main_net,
+            "主力净流入-净占比": _ratio_to_pct(item.get("r0_ratio")),
+            "主力罗盘": _to_float(item.get("r0x_ratio")),
+            "行业净流入-净额": _to_float(item.get("cate_na")),
+            "行业净流入-净占比": _ratio_to_pct(item.get("cate_ra")),
+            "_source": "sina:MoneyFlow.ssl_qsfx_zjlrqs",
         })
     return rows
 
 
 def _fetch_main_fund_flow(ti) -> list:
-    """Fast per-stock Eastmoney fund-flow path; safe to run in quick mode."""
+    """Fast per-stock fund-flow path; safe to run in quick mode."""
     direct = _safe(lambda: _fetch_main_fund_flow_http(ti), [])
     if direct:
         return direct
+    sina = _safe(lambda: _fetch_main_fund_flow_sina(ti), [])
+    if sina:
+        return sina
     return _safe(
         lambda: ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower()).tail(20).to_dict("records"),
         [],
@@ -253,7 +317,7 @@ def main(ticker: str) -> dict:
                 "_skipped_universe_heavy": True,
                 "_note": "资金面重型接口默认跳过；如需大宗/解禁/机构持仓全市场数据，设置 UZI_CAPITAL_FLOW_HEAVY=1 后重跑。",
             },
-            "source": "capital_flow:quick + eastmoney:http_push2his + akshare:stock_individual_fund_flow",
+            "source": "capital_flow:quick + eastmoney:http_push2his + sina:moneyflow + akshare:stock_individual_fund_flow",
             "fallback": False,
         }
 
