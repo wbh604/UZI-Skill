@@ -10,16 +10,20 @@
     header { background: #111827; color: white; padding: 20px 24px; }
     header h1 { margin: 0 0 6px; font-size: 24px; }
     header p { margin: 0; color: #cbd5e1; }
-    main { max-width: 1120px; margin: 24px auto; padding: 0 16px 48px; }
-    .grid { display: grid; grid-template-columns: 380px 1fr; gap: 16px; align-items: start; }
+    main { max-width: 1180px; margin: 24px auto; padding: 0 16px 48px; }
+    .grid { display: grid; grid-template-columns: 400px 1fr; gap: 16px; align-items: start; }
+    .stack { display: grid; gap: 16px; }
     .card { background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); padding: 18px; }
     label { display: block; font-weight: 600; margin: 12px 0 6px; }
-    input, select, button { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 10px; padding: 11px 12px; font-size: 15px; }
+    input, select, textarea, button { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 10px; padding: 11px 12px; font-size: 15px; }
+    textarea { min-height: 96px; resize: vertical; }
     button { background: #2563eb; color: white; border: none; cursor: pointer; font-weight: 700; margin-top: 14px; }
+    button.secondary { background: #475569; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     .row { display: flex; gap: 10px; align-items: center; }
     .row input[type="checkbox"] { width: auto; }
     .hint { color: #6b7280; font-size: 13px; line-height: 1.6; }
+    .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 12px; font-weight: 700; margin: 2px 4px 2px 0; }
     .status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
     .queued { background: #e0f2fe; color: #0369a1; }
     .running { background: #fef3c7; color: #92400e; }
@@ -27,55 +31,101 @@
     .failed { background: #fee2e2; color: #991b1b; }
     pre { max-height: 360px; overflow: auto; background: #0f172a; color: #d1d5db; padding: 12px; border-radius: 10px; white-space: pre-wrap; word-break: break-all; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 14px; }
     th { color: #6b7280; font-size: 13px; }
     a { color: #2563eb; text-decoration: none; font-weight: 700; }
     .danger { color: #b91c1c; }
-    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+    .ok { color: #166534; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
     @media (prefers-color-scheme: dark) {
       body { background: #020617; color: #e5e7eb; }
       .card { background: #0f172a; box-shadow: none; border: 1px solid #1f2937; }
-      input, select { background: #111827; color: #e5e7eb; border-color: #374151; }
+      input, select, textarea { background: #111827; color: #e5e7eb; border-color: #374151; }
       th, td { border-color: #1f2937; }
       .hint { color: #94a3b8; }
+      .pill { background: #1e293b; color: #c7d2fe; }
     }
   </style>
 </head>
 <body>
   <header>
     <h1>UZI Web · 个股深度报告</h1>
-    <p>输入股票代码，选择深度，后台调用 UZI-Skill 生成 HTML 报告。</p>
+    <p>单票 / 批量 / 定时 · 后台调用 UZI-Skill 生成 HTML 报告，可选钉钉通知。</p>
   </header>
   <main>
     <div class="grid">
-      <section class="card">
-        <h2>开始分析</h2>
-        <form id="analyzeForm">
-          <label for="ticker">股票代码 / 名称</label>
-          <input id="ticker" name="ticker" value="600519.SH" placeholder="如 600519.SH / NVDA / 00700.HK" required />
+      <div class="stack">
+        <section class="card">
+          <h2>单票分析</h2>
+          <form id="analyzeForm">
+            <label for="ticker">股票代码 / 名称</label>
+            <input id="ticker" name="ticker" value="600519.SH" placeholder="如 600519.SH / NVDA / 00700.HK" required />
 
-          <label for="depth">分析深度</label>
-          <select id="depth" name="depth">
-            <option value="lite">lite · 快速初筛</option>
-            <option value="medium">medium · 常规分析</option>
-            <option value="deep">deep · 深度研究</option>
-          </select>
+            <label for="depth">分析深度</label>
+            <select id="depth" name="depth">
+              <option value="lite">lite · 快速初筛</option>
+              <option value="medium">medium · 常规分析</option>
+              <option value="deep">deep · 深度研究</option>
+            </select>
 
-          <label class="row">
-            <input id="no_resume" name="no_resume" type="checkbox" />
-            <span>强制重抓数据（--no-resume）</span>
-          </label>
+            <label class="row">
+              <input id="no_resume" name="no_resume" type="checkbox" />
+              <span>强制重抓数据（--no-resume）</span>
+            </label>
+            <label class="row">
+              <input id="notify" name="notify" type="checkbox" />
+              <span>完成后钉钉通知</span>
+            </label>
 
-          <button id="submitBtn" type="submit">生成报告</button>
-        </form>
-        <p class="hint">第一版功能保持简单：单票分析、后台任务、历史报告。批量日报和定时推送仍建议使用 daily_stock_analysis。</p>
-      </section>
+            <button id="submitBtn" type="submit">生成报告</button>
+          </form>
+        </section>
 
-      <section class="card">
-        <h2>当前任务</h2>
-        <div id="jobBox" class="hint">暂无任务。</div>
-        <pre id="logBox" style="display:none"></pre>
-      </section>
+        <section class="card">
+          <h2>批量分析</h2>
+          <form id="batchForm">
+            <label for="batchTickers">股票列表</label>
+            <textarea id="batchTickers" placeholder="一行一个，或逗号分隔：&#10;QQQ&#10;NVDA&#10;TSLA"></textarea>
+            <label for="batchDepth">分析深度</label>
+            <select id="batchDepth">
+              <option value="lite">lite · 快速初筛</option>
+              <option value="medium">medium · 常规分析</option>
+              <option value="deep">deep · 深度研究</option>
+            </select>
+            <label class="row">
+              <input id="batchNoResume" type="checkbox" />
+              <span>强制重抓数据</span>
+            </label>
+            <label class="row">
+              <input id="batchNotify" type="checkbox" />
+              <span>每只完成后钉钉通知</span>
+            </label>
+            <button id="batchBtn" type="submit">提交批量任务</button>
+          </form>
+          <p class="hint">批量任务默认排队执行，适合 3～10 只重点票；大量自选股日报仍建议用 daily_stock_analysis。</p>
+        </section>
+
+        <section class="card">
+          <h2>钉钉 / 定时配置</h2>
+          <div id="configBox" class="hint">加载中...</div>
+          <button id="dingTestBtn" class="secondary" type="button">发送钉钉测试</button>
+          <p id="dingTestResult" class="hint"></p>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="card">
+          <h2>任务列表</h2>
+          <div id="jobsBox" class="hint">暂无任务。</div>
+        </section>
+
+        <section class="card">
+          <h2>当前任务日志</h2>
+          <div id="jobBox" class="hint">点击任务列表里的“查看日志”。</div>
+          <pre id="logBox" style="display:none"></pre>
+        </section>
+      </div>
     </div>
 
     <section class="card" style="margin-top:16px">
@@ -86,16 +136,43 @@
 
   <script>
     const form = document.getElementById('analyzeForm');
+    const batchForm = document.getElementById('batchForm');
     const submitBtn = document.getElementById('submitBtn');
+    const batchBtn = document.getElementById('batchBtn');
     const jobBox = document.getElementById('jobBox');
+    const jobsBox = document.getElementById('jobsBox');
     const logBox = document.getElementById('logBox');
     const reportsBox = document.getElementById('reportsBox');
+    const configBox = document.getElementById('configBox');
+    const dingTestBtn = document.getElementById('dingTestBtn');
+    const dingTestResult = document.getElementById('dingTestResult');
     let currentJobId = null;
-    let timer = null;
+
     document.getElementById('depth').value = {{ default_depth|tojson }};
+    document.getElementById('batchDepth').value = {{ default_depth|tojson }};
+    document.getElementById('notify').checked = {{ default_notify|tojson }};
+    document.getElementById('batchNotify').checked = {{ default_notify|tojson }};
+
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[s]));
+    }
 
     function statusBadge(status) {
-      return `<span class="status ${status}">${status}</span>`;
+      return `<span class="status ${esc(status)}">${esc(status)}</span>`;
+    }
+
+    async function refreshConfig() {
+      const res = await fetch('/api/config');
+      const cfg = await res.json();
+      const schedule = cfg.schedule || {};
+      configBox.innerHTML = `
+        <p>钉钉 Webhook：${cfg.dingtalk_configured ? '<span class="ok">已配置</span>' : '<span class="danger">未配置</span>'}</p>
+        <p>钉钉加签：${cfg.dingtalk_secret_configured ? '已启用' : '未启用'}</p>
+        <p>定时任务：${schedule.enabled ? '<span class="ok">已启用</span>' : '未启用'}</p>
+        <p>定时时间：${(schedule.times || []).map(t => `<span class="pill">${esc(t)}</span>`).join('') || '-'}</p>
+        <p>定时标的：${(schedule.tickers || []).map(t => `<span class="pill">${esc(t)}</span>`).join('') || '-'}</p>
+        <p>并发 / 队列：${cfg.max_parallel_jobs} / ${cfg.max_queue_size}</p>
+      `;
     }
 
     async function refreshReports() {
@@ -110,44 +187,67 @@
           <thead><tr><th>标的</th><th>深度</th><th>摘要</th><th>报告</th></tr></thead>
           <tbody>${reports.map(r => `
             <tr>
-              <td>${r.ticker || r.id}</td>
-              <td>${r.depth || '-'}</td>
-              <td>${r.one_liner || r.generated_at || '-'}</td>
-              <td><a href="${r.url}" target="_blank">打开</a></td>
+              <td class="mono">${esc(r.ticker || r.id)}</td>
+              <td>${esc(r.depth || '-')}</td>
+              <td>${esc(r.one_liner || r.generated_at || '-')}</td>
+              <td><a href="${esc(r.url)}" target="_blank">打开</a></td>
             </tr>`).join('')}
           </tbody>
         </table>`;
     }
 
+    async function refreshJobs() {
+      const res = await fetch('/api/jobs');
+      const jobs = await res.json();
+      if (!jobs.length) {
+        jobsBox.innerHTML = '暂无任务。';
+        return;
+      }
+      jobsBox.innerHTML = `
+        <table>
+          <thead><tr><th>状态</th><th>标的</th><th>来源</th><th>报告</th><th>日志</th></tr></thead>
+          <tbody>${jobs.slice(0, 30).map(j => `
+            <tr>
+              <td>${statusBadge(j.status)}</td>
+              <td class="mono">${esc(j.ticker)}<br><span class="hint">${esc(j.depth)}</span></td>
+              <td>${esc(j.source || 'manual')}</td>
+              <td>${j.report_url ? `<a href="${esc(j.report_url)}" target="_blank">打开</a>` : '-'}</td>
+              <td><a href="#" onclick="selectJob('${esc(j.id)}'); return false;">查看</a></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function selectJob(jobId) {
+      currentJobId = jobId;
+      await pollJob();
+    }
+    window.selectJob = selectJob;
+
     async function pollJob() {
       if (!currentJobId) return;
       const res = await fetch(`/api/jobs/${currentJobId}`);
+      if (!res.ok) return;
       const job = await res.json();
       jobBox.innerHTML = `
-        <p>${statusBadge(job.status)} <strong>${job.ticker}</strong> · ${job.depth}</p>
-        ${job.report_url ? `<p><a href="${job.report_url}" target="_blank">打开 HTML 报告</a></p>` : ''}
-        ${job.error ? `<p class="danger">${job.error}</p>` : ''}
+        <p>${statusBadge(job.status)} <strong>${esc(job.ticker)}</strong> · ${esc(job.depth)} · ${esc(job.source || 'manual')}</p>
+        ${job.batch_id ? `<p class="hint">批次：${esc(job.batch_id)}</p>` : ''}
+        ${job.report_url ? `<p><a href="${esc(job.report_url)}" target="_blank">打开 HTML 报告</a></p>` : ''}
+        ${job.error ? `<p class="danger">${esc(job.error)}</p>` : ''}
       `;
       logBox.style.display = 'block';
       logBox.textContent = job.log || '等待日志输出...';
       logBox.scrollTop = logBox.scrollHeight;
-      if (job.status === 'success' || job.status === 'failed') {
-        submitBtn.disabled = false;
-        clearInterval(timer);
-        timer = null;
-        refreshReports();
-      }
     }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       submitBtn.disabled = true;
-      logBox.style.display = 'block';
-      logBox.textContent = '正在提交任务...';
       const payload = {
         ticker: document.getElementById('ticker').value.trim(),
         depth: document.getElementById('depth').value,
         no_resume: document.getElementById('no_resume').checked,
+        notify: document.getElementById('notify').checked,
       };
       try {
         const res = await fetch('/api/analyze', {
@@ -161,16 +261,77 @@
         }
         const job = await res.json();
         currentJobId = job.id;
-        jobBox.innerHTML = `${statusBadge(job.status)} ${job.ticker}`;
-        timer = setInterval(pollJob, 2000);
-        pollJob();
+        await refreshJobs();
+        await pollJob();
       } catch (err) {
+        jobBox.innerHTML = `<span class="danger">提交失败：${esc(err.message)}</span>`;
+      } finally {
         submitBtn.disabled = false;
-        jobBox.innerHTML = `<span class="danger">提交失败：${err.message}</span>`;
       }
     });
 
+    batchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      batchBtn.disabled = true;
+      const payload = {
+        tickers: document.getElementById('batchTickers').value,
+        depth: document.getElementById('batchDepth').value,
+        no_resume: document.getElementById('batchNoResume').checked,
+        notify: document.getElementById('batchNotify').checked,
+      };
+      try {
+        const res = await fetch('/api/analyze/batch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || `HTTP ${res.status}`);
+        }
+        const result = await res.json();
+        jobBox.innerHTML = `<p class="ok">已提交批量任务：${esc(result.batch_id)}，共 ${result.count} 只。</p>`;
+        currentJobId = result.jobs?.[0]?.id || null;
+        await refreshJobs();
+        await pollJob();
+      } catch (err) {
+        jobBox.innerHTML = `<span class="danger">批量提交失败：${esc(err.message)}</span>`;
+      } finally {
+        batchBtn.disabled = false;
+      }
+    });
+
+    dingTestBtn.addEventListener('click', async () => {
+      dingTestBtn.disabled = true;
+      dingTestResult.textContent = '正在发送测试...';
+      try {
+        const res = await fetch('/api/dingtalk/test', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({content: '股票：这是一条来自 UZI Web 的钉钉测试消息。'}),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || `HTTP ${res.status}`);
+        }
+        dingTestResult.innerHTML = '<span class="ok">钉钉测试发送成功。</span>';
+      } catch (err) {
+        dingTestResult.innerHTML = `<span class="danger">钉钉测试失败：${esc(err.message)}</span>`;
+      } finally {
+        dingTestBtn.disabled = false;
+      }
+    });
+
+    async function tick() {
+      await refreshJobs();
+      await pollJob();
+      await refreshReports();
+    }
+
+    refreshConfig();
     refreshReports();
+    refreshJobs();
+    setInterval(tick, 3000);
   </script>
 </body>
 </html>
