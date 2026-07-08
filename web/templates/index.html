@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UZI Web · 个股深度报告</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7fb; color: #1f2937; }
+    header { background: #111827; color: white; padding: 20px 24px; }
+    header h1 { margin: 0 0 6px; font-size: 24px; }
+    header p { margin: 0; color: #cbd5e1; }
+    main { max-width: 1120px; margin: 24px auto; padding: 0 16px 48px; }
+    .grid { display: grid; grid-template-columns: 380px 1fr; gap: 16px; align-items: start; }
+    .card { background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); padding: 18px; }
+    label { display: block; font-weight: 600; margin: 12px 0 6px; }
+    input, select, button { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 10px; padding: 11px 12px; font-size: 15px; }
+    button { background: #2563eb; color: white; border: none; cursor: pointer; font-weight: 700; margin-top: 14px; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .row input[type="checkbox"] { width: auto; }
+    .hint { color: #6b7280; font-size: 13px; line-height: 1.6; }
+    .status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+    .queued { background: #e0f2fe; color: #0369a1; }
+    .running { background: #fef3c7; color: #92400e; }
+    .success { background: #dcfce7; color: #166534; }
+    .failed { background: #fee2e2; color: #991b1b; }
+    pre { max-height: 360px; overflow: auto; background: #0f172a; color: #d1d5db; padding: 12px; border-radius: 10px; white-space: pre-wrap; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    th { color: #6b7280; font-size: 13px; }
+    a { color: #2563eb; text-decoration: none; font-weight: 700; }
+    .danger { color: #b91c1c; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+    @media (prefers-color-scheme: dark) {
+      body { background: #020617; color: #e5e7eb; }
+      .card { background: #0f172a; box-shadow: none; border: 1px solid #1f2937; }
+      input, select { background: #111827; color: #e5e7eb; border-color: #374151; }
+      th, td { border-color: #1f2937; }
+      .hint { color: #94a3b8; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>UZI Web · 个股深度报告</h1>
+    <p>输入股票代码，选择深度，后台调用 UZI-Skill 生成 HTML 报告。</p>
+  </header>
+  <main>
+    <div class="grid">
+      <section class="card">
+        <h2>开始分析</h2>
+        <form id="analyzeForm">
+          <label for="ticker">股票代码 / 名称</label>
+          <input id="ticker" name="ticker" value="600519.SH" placeholder="如 600519.SH / NVDA / 00700.HK" required />
+
+          <label for="depth">分析深度</label>
+          <select id="depth" name="depth">
+            <option value="lite">lite · 快速初筛</option>
+            <option value="medium">medium · 常规分析</option>
+            <option value="deep">deep · 深度研究</option>
+          </select>
+
+          <label class="row">
+            <input id="no_resume" name="no_resume" type="checkbox" />
+            <span>强制重抓数据（--no-resume）</span>
+          </label>
+
+          <button id="submitBtn" type="submit">生成报告</button>
+        </form>
+        <p class="hint">第一版功能保持简单：单票分析、后台任务、历史报告。批量日报和定时推送仍建议使用 daily_stock_analysis。</p>
+      </section>
+
+      <section class="card">
+        <h2>当前任务</h2>
+        <div id="jobBox" class="hint">暂无任务。</div>
+        <pre id="logBox" style="display:none"></pre>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+      <h2>历史报告</h2>
+      <div id="reportsBox" class="hint">加载中...</div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('analyzeForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const jobBox = document.getElementById('jobBox');
+    const logBox = document.getElementById('logBox');
+    const reportsBox = document.getElementById('reportsBox');
+    let currentJobId = null;
+    let timer = null;
+    document.getElementById('depth').value = {{ default_depth|tojson }};
+
+    function statusBadge(status) {
+      return `<span class="status ${status}">${status}</span>`;
+    }
+
+    async function refreshReports() {
+      const res = await fetch('/api/reports');
+      const reports = await res.json();
+      if (!reports.length) {
+        reportsBox.innerHTML = '暂无历史报告。';
+        return;
+      }
+      reportsBox.innerHTML = `
+        <table>
+          <thead><tr><th>标的</th><th>深度</th><th>摘要</th><th>报告</th></tr></thead>
+          <tbody>${reports.map(r => `
+            <tr>
+              <td>${r.ticker || r.id}</td>
+              <td>${r.depth || '-'}</td>
+              <td>${r.one_liner || r.generated_at || '-'}</td>
+              <td><a href="${r.url}" target="_blank">打开</a></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function pollJob() {
+      if (!currentJobId) return;
+      const res = await fetch(`/api/jobs/${currentJobId}`);
+      const job = await res.json();
+      jobBox.innerHTML = `
+        <p>${statusBadge(job.status)} <strong>${job.ticker}</strong> · ${job.depth}</p>
+        ${job.report_url ? `<p><a href="${job.report_url}" target="_blank">打开 HTML 报告</a></p>` : ''}
+        ${job.error ? `<p class="danger">${job.error}</p>` : ''}
+      `;
+      logBox.style.display = 'block';
+      logBox.textContent = job.log || '等待日志输出...';
+      logBox.scrollTop = logBox.scrollHeight;
+      if (job.status === 'success' || job.status === 'failed') {
+        submitBtn.disabled = false;
+        clearInterval(timer);
+        timer = null;
+        refreshReports();
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      logBox.style.display = 'block';
+      logBox.textContent = '正在提交任务...';
+      const payload = {
+        ticker: document.getElementById('ticker').value.trim(),
+        depth: document.getElementById('depth').value,
+        no_resume: document.getElementById('no_resume').checked,
+      };
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || `HTTP ${res.status}`);
+        }
+        const job = await res.json();
+        currentJobId = job.id;
+        jobBox.innerHTML = `${statusBadge(job.status)} ${job.ticker}`;
+        timer = setInterval(pollJob, 2000);
+        pollJob();
+      } catch (err) {
+        submitBtn.disabled = false;
+        jobBox.innerHTML = `<span class="danger">提交失败：${err.message}</span>`;
+      }
+    });
+
+    refreshReports();
+  </script>
+</body>
+</html>
