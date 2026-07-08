@@ -6,6 +6,7 @@ __pycache__
 .env
 .cache
 data
+logs
 web-reports
 cache
 reports
