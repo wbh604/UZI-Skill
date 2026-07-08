@@ -1,32 +1,64 @@
+# ===================================
+# UZI-Skill Web - Docker Compose
+# ===================================
+#
+# 使用方式:
+#   Web/API 模式: docker compose -f docker/docker-compose.yml up -d server
+#   定时任务模式: docker compose -f docker/docker-compose.yml up -d analyzer
+#   同时启动: docker compose -f docker/docker-compose.yml up -d server analyzer
+
+name: uzi-skill-web
+
+x-common: &common
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: uzi-skill-web:latest
+  restart: unless-stopped
+  env_file:
+    - path: ../.env
+      required: false
+  volumes:
+    - ../data:/app/data
+    - ../logs:/app/logs
+    - ../reports:/app/reports
+    - ../cache:/app/skills/deep-analysis/scripts/.cache
+  environment:
+    TZ: ${TZ:-Asia/Shanghai}
+    UZI_WEB_HOST: 0.0.0.0
+    UZI_WEB_PORT: ${UZI_WEB_PORT:-8977}
+    UZI_WEB_DATA_DIR: /app/data
+    UZI_WEB_LOGS_DIR: /app/logs
+    UZI_WEB_REPORTS_DIR: /app/reports
+    UZI_WEB_PUBLIC_BASE_URL: ${UZI_WEB_PUBLIC_BASE_URL:-}
+    UZI_WEB_DEFAULT_DEPTH: ${UZI_WEB_DEFAULT_DEPTH:-lite}
+    UZI_WEB_MAX_PARALLEL_JOBS: ${UZI_WEB_MAX_PARALLEL_JOBS:-1}
+    UZI_WEB_MAX_QUEUE_SIZE: ${UZI_WEB_MAX_QUEUE_SIZE:-30}
+    UZI_DINGTALK_NOTIFY_DEFAULT: ${UZI_DINGTALK_NOTIFY_DEFAULT:-false}
+    UZI_SCHEDULE_ENABLED: ${UZI_SCHEDULE_ENABLED:-false}
+    UZI_SCHEDULE_TIMES: ${UZI_SCHEDULE_TIMES:-}
+    UZI_SCHEDULE_TICKERS: ${UZI_SCHEDULE_TICKERS:-}
+    UZI_SCHEDULE_DEPTH: ${UZI_SCHEDULE_DEPTH:-lite}
+    UZI_SCHEDULE_NOTIFY: ${UZI_SCHEDULE_NOTIFY:-true}
+    DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
+    DINGTALK_SECRET: ${DINGTALK_SECRET:-}
+    MX_APIKEY: ${MX_APIKEY:-}
+    STOCK_NO_CACHE: ${STOCK_NO_CACHE:-}
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
-  uzi-web:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: uzi-skill-web:latest
-    container_name: uzi-web
-    restart: unless-stopped
+  analyzer:
+    <<: *common
+    container_name: uzi-analyzer
+    command: ["python", "main.py"]
+
+  server:
+    <<: *common
+    container_name: uzi-server
+    command: ["python", "main.py", "--serve-only", "--host", "0.0.0.0", "--port", "${UZI_WEB_PORT:-8977}"]
     ports:
-      - "8977:8977"
-    environment:
-      UZI_WEB_HOST: 0.0.0.0
-      UZI_WEB_PORT: 8977
-      UZI_WEB_PUBLIC_BASE_URL: ${UZI_WEB_PUBLIC_BASE_URL:-}
-      UZI_WEB_DEFAULT_DEPTH: ${UZI_WEB_DEFAULT_DEPTH:-lite}
-      UZI_WEB_MAX_PARALLEL_JOBS: ${UZI_WEB_MAX_PARALLEL_JOBS:-1}
-      UZI_WEB_MAX_QUEUE_SIZE: ${UZI_WEB_MAX_QUEUE_SIZE:-30}
-      UZI_DINGTALK_NOTIFY_DEFAULT: ${UZI_DINGTALK_NOTIFY_DEFAULT:-false}
-      UZI_SCHEDULE_ENABLED: ${UZI_SCHEDULE_ENABLED:-false}
-      UZI_SCHEDULE_TIMES: ${UZI_SCHEDULE_TIMES:-}
-      UZI_SCHEDULE_TICKERS: ${UZI_SCHEDULE_TICKERS:-}
-      UZI_SCHEDULE_DEPTH: ${UZI_SCHEDULE_DEPTH:-lite}
-      UZI_SCHEDULE_NOTIFY: ${UZI_SCHEDULE_NOTIFY:-true}
-      DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
-      DINGTALK_SECRET: ${DINGTALK_SECRET:-}
-      MX_APIKEY: ${MX_APIKEY:-}
-      STOCK_NO_CACHE: ${STOCK_NO_CACHE:-}
-    volumes:
-      - ../data:/app/data
-      - ../web-reports:/app/web-reports
-      - ../cache:/app/skills/deep-analysis/scripts/.cache
-      - ../reports:/app/skills/deep-analysis/scripts/reports
+      - "${UZI_WEB_PORT:-8977}:${UZI_WEB_PORT:-8977}"
