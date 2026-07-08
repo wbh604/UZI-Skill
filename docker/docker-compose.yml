@@ -1,0 +1,22 @@
+services:
+  uzi-web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: uzi-skill-web:latest
+    container_name: uzi-web
+    restart: unless-stopped
+    ports:
+      - "8977:8977"
+    environment:
+      UZI_WEB_HOST: 0.0.0.0
+      UZI_WEB_PORT: 8977
+      UZI_WEB_DEFAULT_DEPTH: lite
+      UZI_WEB_MAX_PARALLEL_JOBS: 1
+      MX_APIKEY: ${MX_APIKEY:-}
+      STOCK_NO_CACHE: ${STOCK_NO_CACHE:-}
+    volumes:
+      - ../data:/app/data
+      - ../web-reports:/app/web-reports
+      - ../cache:/app/skills/deep-analysis/scripts/.cache
+      - ../reports:/app/skills/deep-analysis/scripts/reports
