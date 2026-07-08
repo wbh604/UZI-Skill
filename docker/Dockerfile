@@ -24,10 +24,10 @@ RUN pip install -U pip setuptools wheel && \
 
 COPY . .
 
-RUN mkdir -p /app/data /app/web-reports \
+RUN mkdir -p /app/data /app/logs /app/reports/jobs \
     /app/skills/deep-analysis/scripts/.cache \
     /app/skills/deep-analysis/scripts/reports
 
 EXPOSE 8977
 
-CMD ["bash", "-lc", "uvicorn web.app:app --host ${UZI_WEB_HOST:-0.0.0.0} --port ${UZI_WEB_PORT:-8977}"]
+CMD ["python", "main.py", "--serve-only", "--host", "0.0.0.0", "--port", "8977"]
