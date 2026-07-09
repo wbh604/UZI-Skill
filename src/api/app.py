@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from src.config import DEPTHS, get_settings
+from src.config import get_settings
 from src.services.dingtalk_notifier import DingTalkNotifier
 from src.services.job_queue import JobQueue, parse_tickers
 from src.services.uzi_runner import UziRunner
@@ -22,7 +22,7 @@ runner = UziRunner(settings)
 queue = JobQueue(settings=settings, runner=runner, notifier=notifier)
 
 templates = Jinja2Templates(directory=str(settings.root_dir / "web" / "templates"))
-app = FastAPI(title="UZI Web", version="0.3.0")
+app = FastAPI(title="UZI Web", version="0.3.1")
 app.mount("/reports", StaticFiles(directory=str(settings.reports_dir), html=True), name="reports")
 
 
@@ -61,9 +61,9 @@ def health() -> dict:
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "default_depth": settings.default_depth,
             "default_notify": settings.dingtalk_notify_default,
         },
