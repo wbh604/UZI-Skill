@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from src.config import get_settings, save_runtime_config
 from src.services.dingtalk_notifier import DingTalkNotifier
 from src.services.job_queue import JobQueue, parse_tickers
+from src.services.public_tunnel import PublicTunnelManager
 from src.services.uzi_runner import UziRunner
 
 Depth = Literal["lite", "medium", "deep"]
@@ -20,9 +21,10 @@ settings = get_settings()
 notifier = DingTalkNotifier(settings)
 runner = UziRunner(settings)
 queue = JobQueue(settings=settings, runner=runner, notifier=notifier)
+tunnel_manager = PublicTunnelManager(settings)
 
 templates = Jinja2Templates(directory=str(settings.root_dir / "web" / "templates"))
-app = FastAPI(title="UZI Web", version="0.3.2")
+app = FastAPI(title="UZI Web", version="0.3.3")
 app.mount("/reports", StaticFiles(directory=str(settings.reports_dir), html=True), name="reports")
 
 
@@ -51,6 +53,7 @@ class RuntimeConfigRequest(BaseModel):
     clear_dingtalk_secret: bool = False
     dingtalk_notify_default: bool | None = None
     public_base_url: str | None = None
+    public_tunnel_enabled: bool | None = None
     schedule_enabled: bool | None = None
     schedule_times: str | None = None
     schedule_tickers: str | None = None
@@ -67,15 +70,19 @@ def _mask_secret(value: str, keep_start: int = 8, keep_end: int = 4) -> str:
 
 
 def _reload_runtime_components() -> None:
-    global settings, notifier, runner, queue
+    global settings, notifier, runner, queue, tunnel_manager
+    old_tunnel = tunnel_manager
     settings = get_settings()
     notifier = DingTalkNotifier(settings)
     runner = UziRunner(settings)
     # Recreate queue so newly submitted jobs use the updated notifier/settings.
     queue = JobQueue(settings=settings, runner=runner, notifier=notifier)
+    # Keep a running tunnel; otherwise build a manager using the new settings.
+    tunnel_manager = old_tunnel if old_tunnel.running else PublicTunnelManager(settings)
 
 
 def _config_payload(saved: bool = False, message: str | None = None) -> dict:
+    active_public_url = tunnel_manager.public_url or settings.public_base_url
     return {
         "saved": saved,
         "message": message,
@@ -91,6 +98,8 @@ def _config_payload(saved: bool = False, message: str | None = None) -> dict:
         "dingtalk_secret_masked": _mask_secret(settings.dingtalk_secret, 8, 4),
         "default_notify": settings.dingtalk_notify_default,
         "public_base_url": settings.public_base_url,
+        "active_public_url": active_public_url,
+        "public_tunnel": tunnel_manager.status(),
         "schedule": {
             "enabled": settings.schedule_enabled,
             "times": settings.schedule_times,
@@ -99,6 +108,12 @@ def _config_payload(saved: bool = False, message: str | None = None) -> dict:
             "notify": settings.schedule_notify,
         },
     }
+
+
+@app.on_event("startup")
+def startup() -> None:
+    if settings.public_tunnel_enabled:
+        tunnel_manager.start_async()
 
 
 @app.get("/health")
@@ -112,6 +127,7 @@ def health() -> dict:
         "max_parallel_jobs": settings.max_parallel_jobs,
         "dingtalk_configured": notifier.configured,
         "schedule_enabled": settings.schedule_enabled,
+        "public_tunnel": tunnel_manager.status(),
     }
 
 
@@ -154,6 +170,8 @@ def update_config(payload: RuntimeConfigRequest) -> dict:
         values["UZI_DINGTALK_NOTIFY_DEFAULT"] = payload.dingtalk_notify_default
     if payload.public_base_url is not None:
         values["UZI_WEB_PUBLIC_BASE_URL"] = payload.public_base_url.strip().rstrip("/")
+    if payload.public_tunnel_enabled is not None:
+        values["UZI_PUBLIC_TUNNEL_ENABLED"] = payload.public_tunnel_enabled
     if payload.schedule_enabled is not None:
         values["UZI_SCHEDULE_ENABLED"] = payload.schedule_enabled
     if payload.schedule_times is not None:
@@ -171,6 +189,21 @@ def update_config(payload: RuntimeConfigRequest) -> dict:
         saved=True,
         message=f"已保存到 {runtime_file}。server 已即时生效；如修改定时任务，请重启 analyzer 服务。",
     )
+
+
+@app.post("/api/public-tunnel/start")
+def start_public_tunnel() -> dict:
+    ok, public_url = tunnel_manager.start()
+    if ok and public_url:
+        save_runtime_config({"UZI_WEB_PUBLIC_BASE_URL": public_url})
+        _reload_runtime_components()
+        return _config_payload(saved=True, message=f"公网链接已启动：{public_url}")
+    raise HTTPException(status_code=400, detail=tunnel_manager.error or "公网链接启动失败")
+
+
+@app.get("/api/public-tunnel/status")
+def public_tunnel_status() -> dict:
+    return tunnel_manager.status()
 
 
 @app.post("/api/analyze")
