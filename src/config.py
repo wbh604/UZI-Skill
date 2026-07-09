@@ -19,6 +19,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DEPTHS = {"lite", "medium", "deep"}
 RUNTIME_CONFIG_KEYS = [
     "UZI_WEB_PUBLIC_BASE_URL",
+    "UZI_PUBLIC_TUNNEL_ENABLED",
     "UZI_WEB_DEFAULT_DEPTH",
     "UZI_WEB_MAX_PARALLEL_JOBS",
     "UZI_WEB_MAX_QUEUE_SIZE",
@@ -157,6 +158,8 @@ class Settings:
     web_host: str = field(default_factory=lambda: _get("UZI_WEB_HOST", "0.0.0.0"))
     web_port: int = field(default_factory=lambda: _int("UZI_WEB_PORT", 8977, minimum=1))
     public_base_url: str = field(default_factory=lambda: _get("UZI_WEB_PUBLIC_BASE_URL", "").rstrip("/"))
+    public_tunnel_enabled: bool = field(default_factory=lambda: _bool("UZI_PUBLIC_TUNNEL_ENABLED", False))
+    public_tunnel_timeout: int = field(default_factory=lambda: _int("UZI_PUBLIC_TUNNEL_TIMEOUT", 45, minimum=5))
 
     default_depth: str = field(default_factory=lambda: _depth("UZI_WEB_DEFAULT_DEPTH", "lite"))
     max_parallel_jobs: int = field(default_factory=lambda: _int("UZI_WEB_MAX_PARALLEL_JOBS", 1, minimum=1))
