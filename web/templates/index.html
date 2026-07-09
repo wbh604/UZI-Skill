@@ -62,17 +62,10 @@
           <form id="analyzeForm">
             <label for="ticker">股票代码 / 名称</label>
             <input id="ticker" name="ticker" value="600519.SH" placeholder="如 600519.SH / NVDA / 00700.HK" required />
-
             <label for="depth">分析深度</label>
-            <select id="depth" name="depth">
-              <option value="lite">lite · 快速初筛</option>
-              <option value="medium">medium · 常规分析</option>
-              <option value="deep">deep · 深度研究</option>
-            </select>
-
+            <select id="depth" name="depth"><option value="lite">lite · 快速初筛</option><option value="medium">medium · 常规分析</option><option value="deep">deep · 深度研究</option></select>
             <label class="row"><input id="no_resume" name="no_resume" type="checkbox" /><span>强制重抓数据（--no-resume）</span></label>
             <label class="row"><input id="notify" name="notify" type="checkbox" /><span>完成后钉钉通知</span></label>
-
             <button id="submitBtn" type="submit">生成报告</button>
           </form>
         </section>
@@ -83,11 +76,7 @@
             <label for="batchTickers">股票列表</label>
             <textarea id="batchTickers" placeholder="一行一个，或逗号分隔：&#10;QQQ&#10;NVDA&#10;TSLA"></textarea>
             <label for="batchDepth">分析深度</label>
-            <select id="batchDepth">
-              <option value="lite">lite · 快速初筛</option>
-              <option value="medium">medium · 常规分析</option>
-              <option value="deep">deep · 深度研究</option>
-            </select>
+            <select id="batchDepth"><option value="lite">lite · 快速初筛</option><option value="medium">medium · 常规分析</option><option value="deep">deep · 深度研究</option></select>
             <label class="row"><input id="batchNoResume" type="checkbox" /><span>强制重抓数据</span></label>
             <label class="row"><input id="batchNotify" type="checkbox" /><span>每只完成后钉钉通知</span></label>
             <button id="batchBtn" type="submit">提交批量任务</button>
@@ -96,40 +85,30 @@
         </section>
 
         <section class="card">
-          <h2>钉钉 / 定时配置</h2>
+          <h2>钉钉 / 公网 / 定时配置</h2>
           <div id="configStatus" class="hint">加载中...</div>
           <form id="configForm">
             <label for="configWebhook">钉钉机器人 Webhook</label>
             <input id="configWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." />
             <p id="webhookHint" class="hint"></p>
-
             <label for="configSecret">钉钉加签密钥</label>
             <input id="configSecret" type="password" placeholder="未开启加签可留空；已配置时留空表示不修改" />
             <p id="secretHint" class="hint"></p>
-
-            <label for="configPublicBase">公网访问地址（可选）</label>
-            <input id="configPublicBase" placeholder="如 https://uzi.example.com，用于钉钉报告链接" />
-
+            <label for="configPublicBase">公网访问地址</label>
+            <input id="configPublicBase" placeholder="可手填服务器/内网穿透地址，或点击下方自动生成" />
+            <label class="row"><input id="configPublicTunnelEnabled" type="checkbox" /><span>启动时自动生成临时公网链接（Cloudflare Tunnel）</span></label>
+            <button id="startTunnelBtn" class="secondary" type="button">生成临时公网链接</button>
+            <p id="tunnelResult" class="hint"></p>
             <label class="row"><input id="configNotifyDefault" type="checkbox" /><span>默认勾选“完成后钉钉通知”</span></label>
-
             <div class="divider"></div>
             <label class="row"><input id="configScheduleEnabled" type="checkbox" /><span>启用定时任务（analyzer 服务执行）</span></label>
-
             <label for="configScheduleTimes">定时时间</label>
             <input id="configScheduleTimes" placeholder="21:30,23:30" />
-
             <label for="configScheduleTickers">定时标的</label>
             <textarea id="configScheduleTickers" placeholder="QQQ,NVDA,TSLA"></textarea>
-
             <label for="configScheduleDepth">定时分析深度</label>
-            <select id="configScheduleDepth">
-              <option value="lite">lite · 快速初筛</option>
-              <option value="medium">medium · 常规分析</option>
-              <option value="deep">deep · 深度研究</option>
-            </select>
-
+            <select id="configScheduleDepth"><option value="lite">lite · 快速初筛</option><option value="medium">medium · 常规分析</option><option value="deep">deep · 深度研究</option></select>
             <label class="row"><input id="configScheduleNotify" type="checkbox" /><span>定时任务完成后钉钉通知</span></label>
-
             <button id="saveConfigBtn" type="submit">保存配置</button>
           </form>
           <button id="dingTestBtn" class="secondary" type="button">发送钉钉测试</button>
@@ -139,23 +118,11 @@
       </div>
 
       <div class="stack">
-        <section class="card">
-          <h2>任务列表</h2>
-          <div id="jobsBox" class="hint">暂无任务。</div>
-        </section>
-
-        <section class="card">
-          <h2>当前任务日志</h2>
-          <div id="jobBox" class="hint">点击任务列表里的“查看日志”。</div>
-          <pre id="logBox" style="display:none"></pre>
-        </section>
+        <section class="card"><h2>任务列表</h2><div id="jobsBox" class="hint">暂无任务。</div></section>
+        <section class="card"><h2>当前任务日志</h2><div id="jobBox" class="hint">点击任务列表里的“查看日志”。</div><pre id="logBox" style="display:none"></pre></section>
       </div>
     </div>
-
-    <section class="card" style="margin-top:16px">
-      <h2>历史报告</h2>
-      <div id="reportsBox" class="hint">加载中...</div>
-    </section>
+    <section class="card" style="margin-top:16px"><h2>历史报告</h2><div id="reportsBox" class="hint">加载中...</div></section>
   </main>
 
   <script>
@@ -165,6 +132,7 @@
     const submitBtn = document.getElementById('submitBtn');
     const batchBtn = document.getElementById('batchBtn');
     const saveConfigBtn = document.getElementById('saveConfigBtn');
+    const startTunnelBtn = document.getElementById('startTunnelBtn');
     const jobBox = document.getElementById('jobBox');
     const jobsBox = document.getElementById('jobsBox');
     const logBox = document.getElementById('logBox');
@@ -173,52 +141,47 @@
     const dingTestBtn = document.getElementById('dingTestBtn');
     const dingTestResult = document.getElementById('dingTestResult');
     const configSaveResult = document.getElementById('configSaveResult');
+    const tunnelResult = document.getElementById('tunnelResult');
     let currentJobId = null;
-    let lastConfig = null;
 
     document.getElementById('depth').value = {{ default_depth|tojson }};
     document.getElementById('batchDepth').value = {{ default_depth|tojson }};
     document.getElementById('notify').checked = {{ default_notify|tojson }};
     document.getElementById('batchNotify').checked = {{ default_notify|tojson }};
 
-    function esc(value) {
-      return String(value ?? '').replace(/[&<>'"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[s]));
-    }
+    function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[s])); }
     function statusBadge(status) { return `<span class="status ${esc(status)}">${esc(status)}</span>`; }
 
     function fillConfigForm(cfg) {
       const schedule = cfg.schedule || {};
+      const tunnel = cfg.public_tunnel || {};
       document.getElementById('configWebhook').value = '';
       document.getElementById('configSecret').value = '';
-      document.getElementById('configPublicBase').value = cfg.public_base_url || '';
+      document.getElementById('configPublicBase').value = cfg.active_public_url || cfg.public_base_url || '';
+      document.getElementById('configPublicTunnelEnabled').checked = !!tunnel.enabled;
       document.getElementById('configNotifyDefault').checked = !!cfg.default_notify;
       document.getElementById('configScheduleEnabled').checked = !!schedule.enabled;
       document.getElementById('configScheduleTimes').value = (schedule.times || []).join(',');
       document.getElementById('configScheduleTickers').value = (schedule.tickers || []).join(',');
       document.getElementById('configScheduleDepth').value = schedule.depth || 'lite';
       document.getElementById('configScheduleNotify').checked = !!schedule.notify;
-      document.getElementById('webhookHint').innerHTML = cfg.dingtalk_configured
-        ? `当前已配置：<span class="mono">${esc(cfg.dingtalk_webhook_masked || '***')}</span>；留空表示不修改。`
-        : '未配置。钉钉关键词建议设置为“股票”。';
-      document.getElementById('secretHint').innerHTML = cfg.dingtalk_secret_configured
-        ? `当前已配置：<span class="mono">${esc(cfg.dingtalk_secret_masked || '***')}</span>；留空表示不修改。`
-        : '未启用加签，留空即可。';
+      document.getElementById('webhookHint').innerHTML = cfg.dingtalk_configured ? `当前已配置：<span class="mono">${esc(cfg.dingtalk_webhook_masked || '***')}</span>；留空表示不修改。` : '未配置。钉钉关键词建议设置为“股票”。';
+      document.getElementById('secretHint').innerHTML = cfg.dingtalk_secret_configured ? `当前已配置：<span class="mono">${esc(cfg.dingtalk_secret_masked || '***')}</span>；留空表示不修改。` : '未启用加签，留空即可。';
     }
 
     async function refreshConfig(fill = true) {
       const res = await fetch('/api/config');
       const cfg = await res.json();
-      lastConfig = cfg;
       const schedule = cfg.schedule || {};
+      const tunnel = cfg.public_tunnel || {};
       configStatus.innerHTML = `
         <p>钉钉 Webhook：${cfg.dingtalk_configured ? '<span class="ok">已配置</span>' : '<span class="danger">未配置</span>'}</p>
-        <p>钉钉加签：${cfg.dingtalk_secret_configured ? '已启用' : '未启用'}</p>
-        <p>定时任务：${schedule.enabled ? '<span class="ok">已启用</span>' : '未启用'}</p>
-        <p>定时时间：${(schedule.times || []).map(t => `<span class="pill">${esc(t)}</span>`).join('') || '-'}</p>
+        <p>公网报告地址：${cfg.active_public_url ? `<a href="${esc(cfg.active_public_url)}" target="_blank">${esc(cfg.active_public_url)}</a>` : '<span class="danger">未配置</span>'}</p>
+        <p>临时公网隧道：${tunnel.running ? '<span class="ok">运行中</span>' : (tunnel.enabled ? '已启用，等待启动' : '未启用')} ${tunnel.error ? `<span class="danger">${esc(tunnel.error)}</span>` : ''}</p>
+        <p>定时任务：${schedule.enabled ? '<span class="ok">已启用</span>' : '未启用'}；时间：${(schedule.times || []).map(t => `<span class="pill">${esc(t)}</span>`).join('') || '-'}</p>
         <p>定时标的：${(schedule.tickers || []).map(t => `<span class="pill">${esc(t)}</span>`).join('') || '-'}</p>
         <p>并发 / 队列：${cfg.max_parallel_jobs} / ${cfg.max_queue_size}</p>
-        <p>运行配置文件：<span class="mono">${esc(cfg.runtime_env_file || '-')}</span></p>
-      `;
+        <p>运行配置文件：<span class="mono">${esc(cfg.runtime_env_file || '-')}</span></p>`;
       if (fill) fillConfigForm(cfg);
     }
 
@@ -226,28 +189,14 @@
       const res = await fetch('/api/reports');
       const reports = await res.json();
       if (!reports.length) { reportsBox.innerHTML = '暂无历史报告。'; return; }
-      reportsBox.innerHTML = `
-        <table><thead><tr><th>标的</th><th>深度</th><th>摘要</th><th>报告</th></tr></thead>
-        <tbody>${reports.map(r => `<tr>
-          <td class="mono">${esc(r.ticker || r.id)}</td><td>${esc(r.depth || '-')}</td>
-          <td>${esc(r.one_liner || r.generated_at || '-')}</td>
-          <td><a href="${esc(r.url)}" target="_blank">打开</a></td>
-        </tr>`).join('')}</tbody></table>`;
+      reportsBox.innerHTML = `<table><thead><tr><th>标的</th><th>深度</th><th>摘要</th><th>报告</th></tr></thead><tbody>${reports.map(r => `<tr><td class="mono">${esc(r.ticker || r.id)}</td><td>${esc(r.depth || '-')}</td><td>${esc(r.one_liner || r.generated_at || '-')}</td><td><a href="${esc(r.url)}" target="_blank">打开</a></td></tr>`).join('')}</tbody></table>`;
     }
 
     async function refreshJobs() {
       const res = await fetch('/api/jobs');
       const jobs = await res.json();
       if (!jobs.length) { jobsBox.innerHTML = '暂无任务。'; return; }
-      jobsBox.innerHTML = `
-        <table><thead><tr><th>状态</th><th>标的</th><th>来源</th><th>报告</th><th>日志</th></tr></thead>
-        <tbody>${jobs.slice(0, 30).map(j => `<tr>
-          <td>${statusBadge(j.status)}</td>
-          <td class="mono">${esc(j.ticker)}<br><span class="hint">${esc(j.depth)}</span></td>
-          <td>${esc(j.source || 'manual')}</td>
-          <td>${j.report_url ? `<a href="${esc(j.report_url)}" target="_blank">打开</a>` : '-'}</td>
-          <td><a href="#" onclick="selectJob('${esc(j.id)}'); return false;">查看</a></td>
-        </tr>`).join('')}</tbody></table>`;
+      jobsBox.innerHTML = `<table><thead><tr><th>状态</th><th>标的</th><th>来源</th><th>报告</th><th>日志</th></tr></thead><tbody>${jobs.slice(0, 30).map(j => `<tr><td>${statusBadge(j.status)}</td><td class="mono">${esc(j.ticker)}<br><span class="hint">${esc(j.depth)}</span></td><td>${esc(j.source || 'manual')}</td><td>${j.report_url ? `<a href="${esc(j.report_url)}" target="_blank">打开</a>` : '-'}</td><td><a href="#" onclick="selectJob('${esc(j.id)}'); return false;">查看</a></td></tr>`).join('')}</tbody></table>`;
     }
 
     async function selectJob(jobId) { currentJobId = jobId; await pollJob(); }
@@ -258,82 +207,48 @@
       const res = await fetch(`/api/jobs/${currentJobId}`);
       if (!res.ok) return;
       const job = await res.json();
-      jobBox.innerHTML = `
-        <p>${statusBadge(job.status)} <strong>${esc(job.ticker)}</strong> · ${esc(job.depth)} · ${esc(job.source || 'manual')}</p>
-        ${job.batch_id ? `<p class="hint">批次：${esc(job.batch_id)}</p>` : ''}
-        ${job.report_url ? `<p><a href="${esc(job.report_url)}" target="_blank">打开 HTML 报告</a></p>` : ''}
-        ${job.error ? `<p class="danger">${esc(job.error)}</p>` : ''}`;
-      logBox.style.display = 'block';
-      logBox.textContent = job.log || '等待日志输出...';
-      logBox.scrollTop = logBox.scrollHeight;
+      jobBox.innerHTML = `<p>${statusBadge(job.status)} <strong>${esc(job.ticker)}</strong> · ${esc(job.depth)} · ${esc(job.source || 'manual')}</p>${job.batch_id ? `<p class="hint">批次：${esc(job.batch_id)}</p>` : ''}${job.report_url ? `<p><a href="${esc(job.report_url)}" target="_blank">打开 HTML 报告</a></p>` : ''}${job.error ? `<p class="danger">${esc(job.error)}</p>` : ''}`;
+      logBox.style.display = 'block'; logBox.textContent = job.log || '等待日志输出...'; logBox.scrollTop = logBox.scrollHeight;
     }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault(); submitBtn.disabled = true;
-      const payload = {
-        ticker: document.getElementById('ticker').value.trim(),
-        depth: document.getElementById('depth').value,
-        no_resume: document.getElementById('no_resume').checked,
-        notify: document.getElementById('notify').checked,
-      };
-      try {
-        const res = await fetch('/api/analyze', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-        if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); }
-        const job = await res.json(); currentJobId = job.id; await refreshJobs(); await pollJob();
-      } catch (err) { jobBox.innerHTML = `<span class="danger">提交失败：${esc(err.message)}</span>`; }
+      const payload = { ticker: document.getElementById('ticker').value.trim(), depth: document.getElementById('depth').value, no_resume: document.getElementById('no_resume').checked, notify: document.getElementById('notify').checked };
+      try { const res = await fetch('/api/analyze', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }); if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); } const job = await res.json(); currentJobId = job.id; await refreshJobs(); await pollJob(); }
+      catch (err) { jobBox.innerHTML = `<span class="danger">提交失败：${esc(err.message)}</span>`; }
       finally { submitBtn.disabled = false; }
     });
 
     batchForm.addEventListener('submit', async (e) => {
       e.preventDefault(); batchBtn.disabled = true;
-      const payload = {
-        tickers: document.getElementById('batchTickers').value,
-        depth: document.getElementById('batchDepth').value,
-        no_resume: document.getElementById('batchNoResume').checked,
-        notify: document.getElementById('batchNotify').checked,
-      };
-      try {
-        const res = await fetch('/api/analyze/batch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-        if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); }
-        const result = await res.json();
-        jobBox.innerHTML = `<p class="ok">已提交批量任务：${esc(result.batch_id)}，共 ${result.count} 只。</p>`;
-        currentJobId = result.jobs?.[0]?.id || null; await refreshJobs(); await pollJob();
-      } catch (err) { jobBox.innerHTML = `<span class="danger">批量提交失败：${esc(err.message)}</span>`; }
+      const payload = { tickers: document.getElementById('batchTickers').value, depth: document.getElementById('batchDepth').value, no_resume: document.getElementById('batchNoResume').checked, notify: document.getElementById('batchNotify').checked };
+      try { const res = await fetch('/api/analyze/batch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }); if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); } const result = await res.json(); jobBox.innerHTML = `<p class="ok">已提交批量任务：${esc(result.batch_id)}，共 ${result.count} 只。</p>`; currentJobId = result.jobs?.[0]?.id || null; await refreshJobs(); await pollJob(); }
+      catch (err) { jobBox.innerHTML = `<span class="danger">批量提交失败：${esc(err.message)}</span>`; }
       finally { batchBtn.disabled = false; }
     });
 
     configForm.addEventListener('submit', async (e) => {
       e.preventDefault(); saveConfigBtn.disabled = true; configSaveResult.textContent = '正在保存配置...';
       const payload = {
-        dingtalk_webhook_url: document.getElementById('configWebhook').value.trim(),
-        dingtalk_secret: document.getElementById('configSecret').value.trim(),
-        dingtalk_notify_default: document.getElementById('configNotifyDefault').checked,
-        public_base_url: document.getElementById('configPublicBase').value.trim(),
-        schedule_enabled: document.getElementById('configScheduleEnabled').checked,
-        schedule_times: document.getElementById('configScheduleTimes').value.trim(),
-        schedule_tickers: document.getElementById('configScheduleTickers').value.trim(),
-        schedule_depth: document.getElementById('configScheduleDepth').value,
-        schedule_notify: document.getElementById('configScheduleNotify').checked,
-      };
-      try {
-        const res = await fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-        if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); }
-        const cfg = await res.json();
-        configSaveResult.innerHTML = `<span class="ok">${esc(cfg.message || '保存成功')}</span>`;
-        await refreshConfig(true);
-        document.getElementById('notify').checked = !!cfg.default_notify;
-        document.getElementById('batchNotify').checked = !!cfg.default_notify;
-      } catch (err) { configSaveResult.innerHTML = `<span class="danger">保存失败：${esc(err.message)}</span>`; }
+        dingtalk_webhook_url: document.getElementById('configWebhook').value.trim(), dingtalk_secret: document.getElementById('configSecret').value.trim(), dingtalk_notify_default: document.getElementById('configNotifyDefault').checked,
+        public_base_url: document.getElementById('configPublicBase').value.trim(), public_tunnel_enabled: document.getElementById('configPublicTunnelEnabled').checked,
+        schedule_enabled: document.getElementById('configScheduleEnabled').checked, schedule_times: document.getElementById('configScheduleTimes').value.trim(), schedule_tickers: document.getElementById('configScheduleTickers').value.trim(), schedule_depth: document.getElementById('configScheduleDepth').value, schedule_notify: document.getElementById('configScheduleNotify').checked };
+      try { const res = await fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }); if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); } const cfg = await res.json(); configSaveResult.innerHTML = `<span class="ok">${esc(cfg.message || '保存成功')}</span>`; await refreshConfig(true); document.getElementById('notify').checked = !!cfg.default_notify; document.getElementById('batchNotify').checked = !!cfg.default_notify; }
+      catch (err) { configSaveResult.innerHTML = `<span class="danger">保存失败：${esc(err.message)}</span>`; }
       finally { saveConfigBtn.disabled = false; }
+    });
+
+    startTunnelBtn.addEventListener('click', async () => {
+      startTunnelBtn.disabled = true; tunnelResult.textContent = '正在生成公网链接，可能需要几十秒...';
+      try { const res = await fetch('/api/public-tunnel/start', { method: 'POST' }); if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); } const cfg = await res.json(); tunnelResult.innerHTML = `<span class="ok">${esc(cfg.message || '公网链接已启动')}</span>`; await refreshConfig(true); }
+      catch (err) { tunnelResult.innerHTML = `<span class="danger">公网链接启动失败：${esc(err.message)}</span>`; }
+      finally { startTunnelBtn.disabled = false; }
     });
 
     dingTestBtn.addEventListener('click', async () => {
       dingTestBtn.disabled = true; dingTestResult.textContent = '正在发送测试...';
-      try {
-        const res = await fetch('/api/dingtalk/test', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({content: '股票：这是一条来自 UZI Web 的钉钉测试消息。'}) });
-        if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); }
-        dingTestResult.innerHTML = '<span class="ok">钉钉测试发送成功。</span>';
-      } catch (err) { dingTestResult.innerHTML = `<span class="danger">钉钉测试失败：${esc(err.message)}</span>`; }
+      try { const res = await fetch('/api/dingtalk/test', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({content: '股票：这是一条来自 UZI Web 的钉钉测试消息。'}) }); if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${res.status}`); } dingTestResult.innerHTML = '<span class="ok">钉钉测试发送成功。</span>'; }
+      catch (err) { dingTestResult.innerHTML = `<span class="danger">钉钉测试失败：${esc(err.message)}</span>`; }
       finally { dingTestBtn.disabled = false; }
     });
 
