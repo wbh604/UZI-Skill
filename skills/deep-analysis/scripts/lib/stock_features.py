@@ -141,7 +141,11 @@ def extract_features(raw: dict, dims: dict) -> dict:
         default=0,
     )
     f["roic"] = _f(health.get("roic"))
-    f["fcf_positive"] = f["fcf_margin"] > 0
+    # 三态：抓不到 FCF ≠ FCF 为负。旧版 _f(None) → 0 → fcf_positive=False，于是 IC Memo 和
+    # 首次覆盖会同时凭空捏造一条 High 级风险"现金流为负·依赖外部融资"。
+    # 现在 fcf_known 为假时，下游风险生成器必须闭嘴。
+    f["fcf_known"] = health.get("fcf_margin") is not None
+    f["fcf_positive"] = (f["fcf_margin"] > 0) if f["fcf_known"] else True
 
     # v3.8.0 · DuPont 杜邦分解 · 暴露给评委/报告 (价值派看 ROE 质量来源)
     _dupont = fin.get("dupont") or {}
@@ -375,11 +379,16 @@ def extract_features(raw: dict, dims: dict) -> dict:
         f["industry_growth"] = 0.0
 
     # market_share: 真实 = 公司市值 / 行业总市值 × 100
-    # 数据源：basic.market_cap (亿) + industry.cninfo_metrics.total_mcap_yi (亿)
+    # 数据源：basic.market_cap + industry.cninfo_metrics.total_mcap_yi (亿)
+    # ⚠️ basic.market_cap 视兜底源不同，可能是「元」(tencent_qt 直出 3.6e11) 也可能是「亿」。
+    # 旧版直接当「亿」用 → 洛阳钼业算出 market_share = 30,429,605,425%，BCG 定位随之全错。
+    # A 股最大市值也不过 ~2 万亿元（2e4 亿），故 > 1e6 一律判定为「元」。
     _cmcap_yi = _f(basic.get("market_cap_yi")) or _f(basic.get("market_cap"))
+    if _cmcap_yi > 1e6:
+        _cmcap_yi = _cmcap_yi / 1e8
     _imcap_yi = _f((industry.get("cninfo_metrics") or {}).get("total_mcap_yi"))
     if _cmcap_yi > 0 and _imcap_yi > 0:
-        f["market_share"] = round(_cmcap_yi / _imcap_yi * 100, 2)
+        f["market_share"] = round(min(_cmcap_yi / _imcap_yi * 100, 100.0), 2)
     else:
         f["market_share"] = 0.0
     # Dividend yield from valuation/basic

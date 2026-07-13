@@ -139,6 +139,12 @@ def main(ticker: str) -> dict:
         snips = results[key]["snippets"]
         return " ".join(s.get("body", "")[:100] for s in snips[:n])
 
+    # 搜索一条都没命中时，_evaluate 对空文本返回 5 → 四维全 5 分，看起来像"评估过且中等"，
+    # 实际是一次都没评估（洛阳钼业：ddgs DNS 挂掉，护城河 5/5/5/5 却被 Porter 当真实输入）。
+    # 有证据才给分，没证据就明说没评估。
+    _evidence = {k: bool(results[k]["text"].strip()) for k in ("intangible", "switching", "network", "scale")}
+    _scored = any(_evidence.values())
+
     return {
         "ticker": ti.full,
         "data": {
@@ -151,7 +157,14 @@ def main(ticker: str) -> dict:
                 "switching": switching_score,
                 "network": network_score,
                 "scale": scale_score,
-            },
+            } if _scored else {},
+            "scores_available": _scored,
+            "scores_evidence": _evidence,
+            "scores_note": (
+                None if _scored else
+                "⚠️ 未评估：四个维度的 web 检索均无结果（不是「中等护城河」）。"
+                "Porter/BCG 若引用此项将得到无意义结果。"
+            ),
             "rd_summary": _top_body("rd", n=2) or "—",
             "web_search_snippets": {k: v["snippets"] for k, v in results.items()},
             "moat_framework": ["intangible", "switching", "network", "scale", "efficient_scale"],

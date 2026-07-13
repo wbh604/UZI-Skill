@@ -601,6 +601,10 @@ def stage1(ticker: str) -> dict:
     skip_n = sd.get("skip", 0)
     active_n = len(panel["investors"]) - skip_n
     print(f"  参与 {active_n} · 跳过 {skip_n} · 看多 {sd['bullish']} · 中性 {sd['neutral']} · 看空 {sd['bearish']}")
+    if not panel.get("consensus_valid", True):
+        print(f"  {panel.get('consensus_warning')}")
+        print(f"     空判评委: {', '.join(panel.get('hollow_ids', [])[:8])}")
+        print(f"     → 先补数据再看结论，或直接用 agent 判断覆盖 panel.json")
 
     features = extract_features(raw, raw.get("dimensions", {}))
 

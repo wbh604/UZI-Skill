@@ -383,6 +383,21 @@ def panel_summary(results: dict[str, dict]) -> dict:
     sorted_bear = sorted(active.items(), key=lambda kv: kv[1]["score"])[:5]
 
     n_active = len(active)
+
+    # ── 共识分自检 · "空数据幻觉"闸门 ─────────────────────────────
+    # score=0 且 pass_rules/fail_rules 全空 = 规则引擎拿不到 features 后的默认判负，
+    # 不是对这只股的判断。这类条目一旦占比过高，avg_score 就不再是"评委共识"，
+    # 而是"数据缺失度"的镜像（洛阳钼业：29 个看空里 12 个是这种，共识 23.8 分纯属虚构）。
+    # 宁可标记作废，也不要报一个看起来很权威的假数字。
+    hollow = [
+        k for k, v in active.items()
+        if (v.get("score") or 0) == 0
+        and not v.get("pass_rules")
+        and not v.get("fail_rules")
+    ]
+    hollow_pct = round(len(hollow) / n_active * 100, 0) if n_active else 0
+    consensus_valid = hollow_pct < 20
+
     return {
         "total": len(results),
         "active": n_active,
@@ -397,6 +412,17 @@ def panel_summary(results: dict[str, dict]) -> dict:
         "bearish_pct": round(bearish / n_active * 100, 0) if n_active else 0,
         "top_bulls": [{"id": k, "score": v["score"], "headline": v["headline"]} for k, v in sorted_bull],
         "top_bears": [{"id": k, "score": v["score"], "headline": v["headline"]} for k, v in sorted_bear],
+        # 数据诚实度
+        "hollow_verdicts": len(hollow),
+        "hollow_pct": hollow_pct,
+        "hollow_ids": hollow,
+        "consensus_valid": consensus_valid,
+        "consensus_warning": (
+            None if consensus_valid else
+            f"⛔ 共识分不可采信：{len(hollow)}/{n_active} 位评委（{hollow_pct:.0f}%）是"
+            f"「0 分 + 零条规则」的空数据默认判负，avg_score {avg_score} 反映的是数据缺失度而非投资判断。"
+            f"请补齐数据后重跑，或改用 agent 判断覆盖。"
+        ),
     }
 
 

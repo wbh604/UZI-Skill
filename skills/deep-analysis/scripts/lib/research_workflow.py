@@ -214,7 +214,7 @@ def _build_risks(features: dict, fin: dict) -> list[dict]:
     if features.get("pe", 0) > 60:
         risks.append({"risk": "估值偏高", "severity": "Medium",
                       "detail": f"PE {features.get('pe', 0):.0f}x 高于市场"})
-    if not features.get("fcf_positive", True):
+    if features.get("fcf_known") and not features.get("fcf_positive", True):
         risks.append({"risk": "自由现金流为负", "severity": "High",
                       "detail": "长期依赖外部融资"})
     if features.get("pct_from_60d_high", 0) < -20:

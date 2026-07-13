@@ -96,6 +96,15 @@ def _fetch_a_share(ti) -> dict:
             out["revenue_history"] = _row("营业总收入")
             out["net_profit_history"] = _row("归属于母公司所有者的净利润") or _row("净利润")
             out["financial_years"] = [str(c)[:4] for c in period_cols_annual]
+
+            # 并发抓取被限流时接口会回空单元格，_to_float 把它们静默变成 0.0。
+            # 一家公司连续多年营收/净利为 0 是不可能的 → 判定为抓取失败，删掉让兜底与
+            # data_gaps 接管，而不是把 0 当真数据喂给 DCF 和规则引擎。
+            for _hist_key in ("revenue_history", "net_profit_history"):
+                _vals = out.get(_hist_key) or []
+                if _vals and not any(abs(_to_float(v)) > 1e-9 for v in _vals):
+                    out.pop(_hist_key, None)
+                    out.setdefault("_zero_history_dropped", []).append(_hist_key)
     except Exception as e:
         out["_abstract_error"] = str(e)
 
@@ -120,33 +129,42 @@ def _fetch_a_share(ti) -> dict:
                     break
 
             last = df_ind.iloc[-1]
+            # ROE / 净利率 / ROIC 是"期间累计"指标：一季报里它们只含 Q1 一个季度的利润，
+            # 拿去和"ROE ≥ 15%"这类年度门槛比，会把每只股在 Q1/Q2 全部误判为不及格。
+            # 存量指标（流动比率 / 资产负债率）是时点数，仍用最新一期。
+            last_annual = df_annual.iloc[-1] if len(df_annual) else last
+
             # Financial health
             health = {}
-            for src_key, dst_key, unit_div in [
-                ("流动比率", "current_ratio", 1),
-                ("资产负债率(%)", "debt_ratio", 1),
-                ("总资产净利率(%)", "roic", 1),
-                ("销售净利率(%)", "net_margin_pct", 1),
+            for src_key, dst_key, src_row in [
+                ("流动比率", "current_ratio", last),
+                ("资产负债率(%)", "debt_ratio", last),
+                ("总资产净利率(%)", "roic", last_annual),
+                ("销售净利率(%)", "net_margin_pct", last_annual),
             ]:
                 if src_key in df_ind.columns:
-                    v = _to_float(last.get(src_key))
+                    v = _to_float(src_row.get(src_key))
                     if v:
-                        health[dst_key] = v / unit_div
+                        health[dst_key] = v
             if health:
                 out["financial_health"] = health
 
-            # Net margin / ROE 汇总 summary strings
+            # Net margin / ROE 汇总 summary strings（口径 = 最近一个完整年度）
             if "加权净资产收益率(%)" in df_ind.columns:
-                out["roe"] = f"{_to_float(last['加权净资产收益率(%)']):.1f}%"
+                out["roe"] = f"{_to_float(last_annual['加权净资产收益率(%)']):.1f}%"
+                out["roe_mrq"] = f"{_to_float(last['加权净资产收益率(%)']):.1f}%"
             if "销售净利率(%)" in df_ind.columns:
-                out["net_margin"] = f"{_to_float(last['销售净利率(%)']):.1f}%"
+                out["net_margin"] = f"{_to_float(last_annual['销售净利率(%)']):.1f}%"
+            out["financial_period"] = str(last_annual.get(date_col))[:10]
 
             # v3.8.0 · DuPont 杜邦分解 · ROE = 净利率 × 总资产周转率 × 权益乘数
             # 价值派(巴菲特/张磊)看 ROE 的"质量来源"：margin 驱动=高质量 · 纯杠杆驱动=风险
             try:
-                _dp_nm = _to_float(last.get("销售净利率(%)")) if "销售净利率(%)" in df_ind.columns else None
-                _dp_to = _to_float(last.get("总资产周转率(次)")) if "总资产周转率(次)" in df_ind.columns else None
-                _dp_dr = _to_float(last.get("资产负债率(%)")) if "资产负债率(%)" in df_ind.columns else None
+                # 三个因子必须同口径（全部取最近完整年度），否则 Q1 的净利率 × 年化周转率
+                # 会重构出一个既非季度也非年度的假 ROE（洛阳钼业曾因此得到 8.66% vs 真实 26.61%）。
+                _dp_nm = _to_float(last_annual.get("销售净利率(%)")) if "销售净利率(%)" in df_ind.columns else None
+                _dp_to = _to_float(last_annual.get("总资产周转率(次)")) if "总资产周转率(次)" in df_ind.columns else None
+                _dp_dr = _to_float(last_annual.get("资产负债率(%)")) if "资产负债率(%)" in df_ind.columns else None
                 _dp_em = (100.0 / (100.0 - _dp_dr)) if (_dp_dr not in (None, 0) and _dp_dr < 100) else None
                 if _dp_nm is not None and _dp_to is not None and _dp_em is not None:
                     _dp_roe = _dp_nm * _dp_to * _dp_em  # net_margin% × turnover × em → ROE%

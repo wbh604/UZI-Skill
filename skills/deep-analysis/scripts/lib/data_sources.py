@@ -243,6 +243,32 @@ def _fetch_a_share_basic_from_baostock(ti: TickerInfo, *, include_quote: bool = 
     return source
 
 
+def _fetch_a_share_profile_cninfo(code: str) -> dict:
+    """巨潮公司概况 — 行业/主营的兜底源。
+
+    东财 stock_individual_info_em 与雪球 stock_individual_basic_info_xq 在 2026 已持续失效
+    （分别返回 JSONDecodeError 与 KeyError 'data'），而 industry 一旦为空，下游 7 个 fetcher
+    会统统 fallback 成"综合"，再被 cninfo 模糊匹配到完全无关的行业（洛阳钼业曾被匹到
+    "废弃资源综合利用业"，行业 PE 因此全错）。巨潮这条链路仍然可用，作为最后一道兜底。
+    """
+    if ak is None:
+        return {}
+    df = ak.stock_profile_cninfo(symbol=code)
+    if df is None or df.empty:
+        return {}
+    rec = df.to_dict("records")[0]
+    out: dict = {}
+    if rec.get("所属行业"):
+        out["industry"] = str(rec["所属行业"]).strip()
+    if rec.get("A股简称"):
+        out["name"] = str(rec["A股简称"]).strip()
+    if rec.get("公司名称"):
+        out["full_name"] = str(rec["公司名称"]).strip()
+    if rec.get("上市日期"):
+        out["listed_date"] = str(rec["上市日期"]).strip()
+    return out
+
+
 def _ensure_a_share_basic_fields(out: dict, ti: TickerInfo) -> dict:
     """Field-level fallback gate for A-share basic data.
 
@@ -283,6 +309,15 @@ def _ensure_a_share_basic_fields(out: dict, ti: TickerInfo) -> dict:
             _merge_missing_basic_fields(out, _fetch_a_share_name_from_ak_code_name(ti), "field:ak_code_name", fields=("name",))
         except Exception as e:
             out["_field_ak_code_name_err"] = f"{type(e).__name__}: {str(e)[:80]}"
+
+    if out.get("industry") in (None, "", "-"):
+        try:
+            _merge_missing_basic_fields(
+                out, _fetch_a_share_profile_cninfo(ti.code), "field:cninfo_profile",
+                fields=("industry", "name", "full_name", "listed_date"),
+            )
+        except Exception as e:
+            out["_field_cninfo_profile_err"] = f"{type(e).__name__}: {str(e)[:80]}"
 
     if out.get("industry") in (None, "", "-"):
         industry = _known_stock_industry(ti.code)

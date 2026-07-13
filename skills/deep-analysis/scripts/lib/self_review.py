@@ -529,6 +529,32 @@ def check_consensus_formula_sanity(ctx: dict) -> list[Issue]:
     return issues
 
 
+def check_panel_hollow_verdicts(ctx: dict) -> list[Issue]:
+    """空数据幻觉闸门 · score=0 且零条规则的评委占比过高时，共识分不可采信。
+
+    洛阳钼业(603993)实例：29 位看空里 12 位是「0 分 + 零 fail_rule」，理由是"非降息周期"
+    "垄断度不够"这类风格模板——它们不是对个股的判断，而是规则引擎拿不到 features 后的
+    默认判负。avg_score 23.8 反映的是数据缺失度，不是投资判断。这类报告一律不许出。
+    """
+    issues = []
+    panel = ctx.get("panel") or {}
+    if panel.get("consensus_valid", True):
+        return issues
+    issues.append(Issue(
+        severity="critical", category="panel", dim="panel",
+        issue=f"共识分建立在空数据之上（{panel.get('hollow_verdicts')} 位评委 0 分且零条规则）",
+        evidence=(
+            f"hollow_pct={panel.get('hollow_pct')}% · panel_consensus={panel.get('panel_consensus')} · "
+            f"ids={', '.join((panel.get('hollow_ids') or [])[:8])}"
+        ),
+        suggested_fix=(
+            "补齐 features 缺口（优先 0_basic.industry / 财报 / 估值）后重跑 stage1，"
+            "或在 agent_analysis.json 里用 agent 判断覆盖 panel。禁止直接引用 panel_consensus。"
+        ),
+    ))
+    return issues
+
+
 def check_panel_insights_rendered(ctx: dict) -> list[Issue]:
     """v2.9.1 · panel_insights 字段必须在报告里渲染（之前被丢掉的 bug）"""
     issues = []
@@ -595,6 +621,7 @@ CHECKS = [
     check_factcheck_redflags,
     # v2.9.1 · 评委汇总一致性检查
     check_consensus_formula_sanity,
+    check_panel_hollow_verdicts,
     check_panel_insights_rendered,
     check_debate_bull_bear_populated,
 ]
