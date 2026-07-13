@@ -173,7 +173,7 @@ def _ic_risks(features: dict, moat: dict) -> list[dict]:
             "severity": "Medium",
             "mitigant": "等待 PE 回归 40 以下再建仓",
         })
-    if not features.get("fcf_positive", True):
+    if features.get("fcf_known") and not features.get("fcf_positive", True):
         risks.append({
             "risk": "现金流为负",
             "detail": "依赖外部融资",

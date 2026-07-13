@@ -66,7 +66,7 @@ INDUSTRY_ESTIMATES: dict[str, dict] = {
 
 
 def _best_industry_match(industry: str) -> dict:
-    if not industry:
+    if not industry or industry.strip() in _INDUSTRY_PLACEHOLDERS:
         return {}
     for key, val in INDUSTRY_ESTIMATES.items():
         if key in industry or industry in key or industry[:2] in key:
@@ -74,9 +74,15 @@ def _best_industry_match(industry: str) -> dict:
     return {}
 
 
+# 上游 industry 抓不到时，run_real_test 会把"综合"当占位符传进来。拿占位符去做语义匹配
+# 一定会命中垃圾（洛阳钼业曾因此匹到"废弃资源综合利用业"，行业 PE 34.24 完全无关），
+# 宁可返回空让 agent 知道缺数据，也不要一个假的行业对标。
+_INDUSTRY_PLACEHOLDERS = {"综合", "其他", "未知", "-", "—", "None"}
+
+
 def _cninfo_industry_metrics(industry_name: str) -> dict:
     """Pull industry aggregated PE from cninfo — works on this network."""
-    if not industry_name:
+    if not industry_name or industry_name.strip() in _INDUSTRY_PLACEHOLDERS:
         return {}
     today = datetime.now()
     for i in range(1, 8):

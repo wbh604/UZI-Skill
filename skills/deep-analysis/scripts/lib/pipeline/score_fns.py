@@ -520,9 +520,31 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
             "dominant_signal": dominant,
         }
 
+    # ── 空数据幻觉闸门 ──────────────────────────────────────────────
+    # score=0 且 pass/fail 规则全空 = 规则引擎拿不到 features 后的默认判负，不是投资判断。
+    # 占比过高时 panel_consensus 反映的是「数据缺失度」而非「评委共识」，必须自我作废。
+    _active_out = [i for i in investors_out if i.get("signal") != "skip"]
+    _hollow = [
+        i.get("investor_id") for i in _active_out
+        if (i.get("score") or 0) == 0
+        and not i.get("pass_rules") and not i.get("fail_rules")
+    ]
+    _hollow_pct = round(len(_hollow) / len(_active_out) * 100, 0) if _active_out else 0
+    _consensus_valid = _hollow_pct < 20
+
     return {
         "ticker": raw["ticker"],
         "panel_consensus": round(consensus, 1),
+        "consensus_valid": _consensus_valid,
+        "hollow_verdicts": len(_hollow),
+        "hollow_pct": _hollow_pct,
+        "hollow_ids": _hollow,
+        "consensus_warning": (
+            None if _consensus_valid else
+            f"⛔ 共识分不可采信：{len(_hollow)}/{len(_active_out)} 位评委（{_hollow_pct:.0f}%）"
+            f"是「0 分 + 零条规则」的空数据默认判负。panel_consensus "
+            f"{round(consensus, 1)} 反映的是数据缺失度，不是投资判断。"
+        ),
         "vote_distribution": vote_dist,
         "signal_distribution": sig_dist,
         "investors": investors_out,

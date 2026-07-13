@@ -46,8 +46,10 @@ def main(ticker: str) -> dict:
     negative_kws = ["看空", "下跌", "亏损", "利空", "减仓", "卖出", "割肉", "杀跌"]
     pos = sum(1 for kw in positive_kws if kw in text)
     neg = sum(1 for kw in negative_kws if kw in text)
-    total = pos + neg if (pos + neg) > 0 else 1
-    positive_pct = round(pos / total * 100, 0)
+    # 一条舆情都没抓到 ≠ 市场看空。旧版 pos=neg=0 → positive_pct = 0/1 = 0% → 标签"悲观"，
+    # 把抓取失败伪装成了真实的负面情绪（洛阳钼业：股吧 0 条结果，却被判"悲观"）。
+    has_signal = (pos + neg) > 0
+    positive_pct = round(pos / (pos + neg) * 100, 0) if has_signal else None
 
     # Heat gauge (0-100) based on total platform hits
     total_hits = sum(platform_hit.values())
@@ -90,8 +92,8 @@ def main(ticker: str) -> dict:
         if news_text:
             pos += sum(1 for kw in positive_kws if kw in news_text)
             neg += sum(1 for kw in negative_kws if kw in news_text)
-            total2 = pos + neg if (pos + neg) > 0 else 1
-            positive_pct = round(pos / total2 * 100, 0)
+            has_signal = (pos + neg) > 0
+            positive_pct = round(pos / (pos + neg) * 100, 0) if has_signal else None
         news_hit = news_multi.get("total_hits", 0) or 0
         heat = min(100, heat + news_hit * 2)
     except Exception as _e:
@@ -104,8 +106,12 @@ def main(ticker: str) -> dict:
             "thermometer_value": heat,
             "guba_volume": f"{platform_hit.get('guba', 0)} 条结果",
             "big_v_mentions": f"{big_v_count} 位大V提及" if big_v_count else "—",
-            "positive_pct": f"{positive_pct}%",
-            "sentiment_label": "乐观" if positive_pct > 60 else "悲观" if positive_pct < 40 else "中性",
+            "sentiment_data_available": has_signal,
+            "positive_pct": f"{positive_pct}%" if has_signal else "—",
+            "sentiment_label": (
+                ("乐观" if positive_pct > 60 else "悲观" if positive_pct < 40 else "中性")
+                if has_signal else "⚠️ 数据缺失（未抓到任何舆情，非真实负面）"
+            ),
             "platform_snippets": snippets,
             "platform_hits": platform_hit,
             "total_mentions": total_hits,
