@@ -110,6 +110,12 @@ def extract_features(raw: dict, dims: dict) -> dict:
     f["roe_latest"] = _last(roe_hist)
     f["roe_5y_avg"] = _avg(roe_hist[-5:]) if len(roe_hist) >= 2 else _last(roe_hist)
     f["roe_5y_min"] = _min(roe_hist[-5:]) if len(roe_hist) >= 2 else _last(roe_hist)
+    f["roe_ttm"] = f["roe_latest"]  # 最新报告期 ROE，与 roe_latest 同源（口径统一）
+    f["roe_ttm"] = f["roe_latest"]  # 最新报告期 ROE，与 roe_latest 同源（口径统一）
+    f["roe_ttm"] = f["roe_latest"]  # 最新报告期 ROE，与 roe_latest 同源（口径统一）
+    f["roe_ttm"] = f["roe_latest"]  # 最新报告期 ROE，与 roe_latest 同源（口径统一）
+    f["roe_ttm"] = f["roe_latest"]  # 最新报告期 ROE，与 roe_latest 同源（口径统一）
+    f["roe_ttm"] = f["roe_latest"]  # 最新报告期 ROE，与 roe_latest 同源（口径统一）
     f["roe_5y_above_15"] = sum(1 for v in roe_hist[-5:] if _f(v) > 15)
     f["roe_5y_above_10"] = sum(1 for v in roe_hist[-5:] if _f(v) > 10)
     f["roe_trend_up"] = _last(roe_hist) > _avg(roe_hist[:-1]) if len(roe_hist) >= 3 else False
@@ -196,6 +202,12 @@ def extract_features(raw: dict, dims: dict) -> dict:
 
     # ─────────────── VALUATION ───────────────
     f["pe"] = _f(basic.get("pe_ttm")) or _f(valuation.get("pe"))
+    f["pe_ttm"] = f["pe"]  # alias: 模板引用 pe_ttm，值已算好
+    f["pe_ttm"] = f["pe"]  # alias: 模板引用 pe_ttm，值已算好
+    f["pe_ttm"] = f["pe"]  # alias: 模板引用 pe_ttm，值已算好
+    f["pe_ttm"] = f["pe"]  # alias: 模板引用 pe_ttm，值已算好
+    f["pe_ttm"] = f["pe"]  # alias: 模板引用 pe_ttm，值已算好
+    f["pe_ttm"] = f["pe"]  # alias: 模板引用 pe_ttm，值已算好
     f["pb"] = _f(basic.get("pb")) or _f(valuation.get("pb"))
     f["pe_x_pb"] = f["pe"] * f["pb"]
     # Parse "5 年 80 分位" → 80

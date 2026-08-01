@@ -21,7 +21,8 @@ class FinancialsRenderer(SectionRenderer):
 
     def render_full(self, ctx: RenderContext) -> str:
         data = ctx.data
-        roe = _fmt_pct(data.get("roe") or data.get("roe_ttm"))
+        roe = _fmt_pct(data.get("roe_ttm") or data.get("roe_latest"))
+        roe_5y_min = _fmt_pct(data.get("roe_5y_min"))
         net_margin = _fmt_pct(data.get("net_margin"))
         gross_margin = _fmt_pct(data.get("gross_margin"))
         rev_growth = _fmt_pct(data.get("revenue_growth") or data.get("revenue_growth_yoy"))
@@ -31,7 +32,8 @@ class FinancialsRenderer(SectionRenderer):
         return f'''<section id="{self.section_id}">
   <h2>{self.section_title}</h2>
   <div class="fin-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-    <div class="fin-metric"><div class="label">ROE</div><div class="value"><strong>{roe}</strong></div></div>
+    <div class="fin-metric"><div class="label">ROE(近季)</div><div class="value"><strong>{roe}</strong></div></div>
+    <div class="fin-metric"><div class="label">ROE 5年低</div><div class="value"><strong>{roe_5y_min}</strong></div></div>
     <div class="fin-metric"><div class="label">净利率</div><div class="value"><strong>{net_margin}</strong></div></div>
     <div class="fin-metric"><div class="label">毛利率</div><div class="value">{gross_margin}</div></div>
     <div class="fin-metric"><div class="label">营收增速</div><div class="value">{rev_growth}</div></div>

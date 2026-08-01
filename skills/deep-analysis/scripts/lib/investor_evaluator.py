@@ -112,13 +112,13 @@ def _fmt_msg(template: str, features: dict) -> str:
     try:
         return template.format(**features)
     except (KeyError, IndexError, ValueError):
-        # Fall back: strip unresolved placeholders
-        try:
-            # replace missing keys with "?"
-            safe = {k: features.get(k, "?") for k in _extract_keys(template)}
-            return template.format(**safe)
-        except Exception:
-            return template
+        # Fall back: 把缺失的 {key:fmt} 直接替换成 "?"，避免对 "?" 套用 :.0f 再抛 ValueError
+        import re as _re
+        out = template
+        for _k in set(_extract_keys(template)):
+            if _k not in features:
+                out = _re.sub(r"\{" + _re.escape(_k) + r"(:[^{}]+)?\}", "?", out)
+        return out
 
 
 def _extract_keys(template: str) -> list[str]:
