@@ -345,6 +345,7 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
 
     for inv in INVESTORS:
         inv_id = inv["id"]
+        mandate = inv.get("mandate", "long")
         verdict_obj = _evaluate_investor(inv_id, features)
 
         sig = verdict_obj["signal"]
@@ -381,13 +382,15 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
 
         v_key = {"强烈买入": "strongly_buy", "买入": "buy", "关注": "watch",
                  "观望": "wait", "回避": "avoid", "不适合": "skip"}.get(verdict, "n_a")
-        vote_dist[v_key] = vote_dist.get(v_key, 0) + 1
-        sig_dist[sig] = sig_dist.get(sig, 0) + 1
+        if mandate != "short":
+            vote_dist[v_key] = vote_dist.get(v_key, 0) + 1
+            sig_dist[sig] = sig_dist.get(sig, 0) + 1
 
         investors_out.append({
             "investor_id": inv_id,
             "name": inv["name"],
             "group": inv["group"],
+            "mandate": mandate,
             "avatar": f"avatars/{inv_id}.svg",
             "signal": sig,
             "confidence": confidence,
@@ -427,9 +430,12 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
     SCORE_WEIGHT = 0.65   # score 均值权重（连续分 · 区分度）
     VOTE_WEIGHT  = 0.35   # vote 比例权重（离散投票 · 稳定性）
     POLARIZE_K = 1.30     # 极化系数 · >1 让两端拉开 · 50 为中心
-    active_count = len(investors_out) - sig_dist.get("skip", 0)
     bullish = sig_dist.get("bullish", 0)
     neutral = sig_dist.get("neutral", 0)
+    bearish = sig_dist.get("bearish", 0)
+    # v2.15.6 · 做空派 bullish="无做空逻辑" 不等同 long 派买入 · 已在循环内剔除 ·
+    # active_count 用 long-book 活跃数（bullish+neutral+bearish）
+    active_count = bullish + neutral + bearish
 
     def _polarize(c: float, k: float = POLARIZE_K) -> float:
         """极化拉伸 · 50 为中心 · 距离 * k · 裁剪到 [0, 100].
@@ -441,12 +447,31 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
         return max(0.0, min(100.0, 50.0 + (c - 50.0) * k))
 
     # 分量 1 · score 均值（active only · skip 不计）
-    active_scores = [m["score"] for m in investors_out if m.get("signal") != "skip"]
+    active_scores = [m["score"] for m in investors_out if m.get("mandate") != "short" and m.get("signal") != "skip"]
     score_mean = (sum(active_scores) / len(active_scores)) if active_scores else 50.0
     # 分量 2 · vote 比例（原 v2.11 公式）
     vote_weighted = (bullish + NEUTRAL_WEIGHT * neutral) / max(active_count, 1) * 100
     consensus_raw = SCORE_WEIGHT * score_mean + VOTE_WEIGHT * vote_weighted
     consensus = _polarize(consensus_raw)
+
+    # v2.15.6 · 做空派共识独立成块（不再污染 long-book 共识）
+    short_book = [m for m in investors_out if m.get("mandate") == "short"]
+    short_active_m = [m for m in short_book if m.get("signal") != "skip"]
+    short_bear = sum(1 for m in short_active_m if m.get("signal") == "bearish")
+    short_no_thesis = sum(1 for m in short_active_m if m.get("signal") in ("bullish", "neutral"))
+    short_scores = [m["score"] for m in short_active_m]
+    short_consensus = {
+        "total": len(short_book),
+        "active": len(short_active_m),
+        "skip": len(short_book) - len(short_active_m),
+        "short_candidates": short_bear,        # bearish = 可做空候选
+        "no_short_thesis": short_no_thesis,    # bullish/neutral = 无可做空逻辑
+        "avg_score": round(sum(short_scores) / len(short_scores), 1) if short_scores else 50.0,
+        "top_short_candidates": [
+            {"id": m["investor_id"], "name": m["name"], "score": m["score"], "headline": m["headline"]}
+            for m in sorted(short_active_m, key=lambda x: x["score"])[:5]  # 得分最低=做空逻辑最强
+        ],
+    }
 
     # v2.15.4+ · 按流派打分（v2.15.5 同步升级为混合公式）
     # 譬如白马消费股：价值派 85 分（重仓），技术派 30 分（趋势破位）·
@@ -479,11 +504,11 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
     for g in sorted(by_group.keys()):
         members = by_group[g]
         n_members = len(members)
-        active_m = [m for m in members if m.get("signal") != "skip"]
+        active_m = [m for m in members if m.get("signal") != "skip" and m.get("mandate") != "short"]
         n_active = len(active_m)
-        g_bull = sum(1 for m in members if m.get("signal") == "bullish")
-        g_neu  = sum(1 for m in members if m.get("signal") == "neutral")
-        g_bear = sum(1 for m in members if m.get("signal") == "bearish")
+        g_bull = sum(1 for m in active_m if m.get("signal") == "bullish")
+        g_neu  = sum(1 for m in active_m if m.get("signal") == "neutral")
+        g_bear = sum(1 for m in active_m if m.get("signal") == "bearish")
         g_skip = sum(1 for m in members if m.get("signal") == "skip")
 
         # v2.15.5 · 流派级混合公式（与总盘保持一致 · 同样极化）
@@ -528,9 +553,11 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
         "investors": investors_out,
         # v2.15.4 · 按流派分数 · 7 个 school 各自 consensus/avg_score/verdict
         "school_scores": school_scores,
+        "long_active": active_count,
+        "short_consensus": short_consensus,
         # v2.15.5 · 诊断字段 · 混合公式各分量 + 极化前后值
         "consensus_formula": {
-            "version": "v2.15.5 · polarize(0.65*score_mean + 0.35*vote_weighted, k=1.3)",
+            "version": "v2.15.6 · polarize(0.65*score_mean + 0.35*vote_weighted, k=1.3) · 做空派不计入 long-book",
             "score_weight": SCORE_WEIGHT,
             "vote_weight": VOTE_WEIGHT,
             "neutral_weight": NEUTRAL_WEIGHT,
@@ -544,6 +571,7 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
             "bearish": sig_dist.get("bearish", 0),
             "skip": sig_dist.get("skip", 0),
             "active": active_count,
+            "short_excluded": len([m for m in investors_out if m.get("mandate") == "short"]),
         },
     }
 
