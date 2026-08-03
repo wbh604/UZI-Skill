@@ -98,3 +98,80 @@ def etf_context(
             "theme": instrument_id,
         },
     )
+
+
+def stock_context(
+    instrument_id: str,
+    *,
+    price: float,
+    name: str,
+    tail_return_pct: float = 0.6,
+    is_st: bool = False,
+    pre_close: float | None = None,
+    limit_up: float | None = None,
+    suspended: bool = False,
+    listing_days: int = 365,
+    amount: float = 500_000_000.0,
+    adverse_event: bool = False,
+) -> InstrumentContext:
+    previous = pre_close if pre_close is not None else price / 1.01
+    first = quote(
+        instrument_id=instrument_id,
+        instrument_type=InstrumentType.STOCK,
+        last_price=price,
+        open=previous,
+        high=max(price, previous),
+        low=min(price, previous),
+        pre_close=previous,
+        source="eastmoney",
+    )
+    second = quote(
+        instrument_id=instrument_id,
+        instrument_type=InstrumentType.STOCK,
+        last_price=price,
+        open=previous,
+        high=max(price, previous),
+        low=min(price, previous),
+        pre_close=previous,
+        source="tencent",
+    )
+    quality_decision = QualityDecision(
+        instrument_id=instrument_id,
+        level=QualityLevel.PASS,
+        reasons=(),
+        canonical_quote=first,
+        source_quotes=(first, second),
+    )
+    return InstrumentContext(
+        instrument_id=instrument_id,
+        name=name,
+        instrument_type=InstrumentType.STOCK,
+        quality=quality_decision,
+        quote=first,
+        historical={
+            "avg_amount_20d": amount,
+            "daily_gain_pct": (price / previous - 1.0) * 100.0,
+            "return_20d_pct": 4.0,
+            "volatility_20d_pct": 1.5,
+            "net_mf_amount": amount * 0.02,
+            "net_mf_amount_5d": amount * 0.05,
+            "sector_relative_strength": 0.5,
+        },
+        intraday={
+            "production_ready": True,
+            "tail_return_pct": tail_return_pct,
+            "vwap_distance_pct": 0.2,
+            "range_position": 0.7,
+            "amount_ratio": 1.2,
+        },
+        events={"adverse_event": adverse_event},
+        metadata={
+            "lot_size": 100,
+            "is_st": is_st,
+            "delisting": False,
+            "suspended": suspended,
+            "listing_days": listing_days,
+            "limit_up": limit_up,
+            "theme": "fixture-sector",
+        },
+    )

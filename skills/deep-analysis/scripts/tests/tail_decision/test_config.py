@@ -18,6 +18,10 @@ def test_default_config_uses_one_shared_8000_exposure_cap():
     assert config.max_stock_candidates == 2
     assert config.min_etf_daily_amount == 50_000_000.0
     assert config.max_etf_premium_pct == 1.0
+    assert config.min_stock_daily_amount == 300_000_000.0
+    assert config.min_stock_listing_days == 60
+    assert config.max_stock_daily_gain_pct == 9.2
+    assert config.near_limit_distance_pct == 0.5
 
 
 def test_config_rejects_exposure_above_assets():

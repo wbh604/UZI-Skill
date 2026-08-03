@@ -21,6 +21,10 @@ class DecisionConfig:
     max_etf_premium_pct: float = 1.0
     etf_nav_stale_minutes: int = 30
     etf_excessive_daily_gain_pct: float = 5.0
+    min_stock_daily_amount: float = 300_000_000.0
+    min_stock_listing_days: int = 60
+    max_stock_daily_gain_pct: float = 9.2
+    near_limit_distance_pct: float = 0.5
     max_quote_age_seconds: int = 60
     max_price_deviation_pct: float = 0.3
     min_sources_for_recommendation: int = 2
@@ -50,6 +54,7 @@ class DecisionConfig:
             "max_etf_candidates",
             "max_stock_candidates",
             "etf_nav_stale_minutes",
+            "min_stock_listing_days",
             "max_quote_age_seconds",
             "min_sources_for_recommendation",
             "stock_lot_size",
@@ -62,6 +67,8 @@ class DecisionConfig:
             "max_price_deviation_pct",
             "max_etf_premium_pct",
             "etf_excessive_daily_gain_pct",
+            "max_stock_daily_gain_pct",
+            "near_limit_distance_pct",
             "stock_commission_rate",
             "etf_commission_rate",
             "minimum_commission",
@@ -74,6 +81,8 @@ class DecisionConfig:
 
         if self.min_etf_daily_amount <= 0:
             raise ValueError("min_etf_daily_amount must be positive")
+        if self.min_stock_daily_amount <= 0:
+            raise ValueError("min_stock_daily_amount must be positive")
 
         decision_start = _parse_time(self.decision_start, "decision_start")
         final_decision_time = _parse_time(
