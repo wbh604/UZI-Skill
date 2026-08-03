@@ -3,7 +3,13 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from lib.tail_decision.contracts import InstrumentType, QuoteSnapshot
+from lib.tail_decision.contracts import (
+    InstrumentContext,
+    InstrumentType,
+    QualityDecision,
+    QualityLevel,
+    QuoteSnapshot,
+)
 
 
 def quote(**overrides) -> QuoteSnapshot:
@@ -24,3 +30,71 @@ def quote(**overrides) -> QuoteSnapshot:
     }
     values.update(overrides)
     return QuoteSnapshot(**values)
+
+
+def etf_context(
+    instrument_id: str,
+    *,
+    amount: float,
+    tail_return_pct: float,
+    vwap_distance_pct: float,
+    quality: str,
+) -> InstrumentContext:
+    first = quote(
+        instrument_id=instrument_id,
+        instrument_type=InstrumentType.ETF,
+        last_price=1.18,
+        open=1.17,
+        high=1.19,
+        low=1.16,
+        pre_close=1.16,
+        source="eastmoney",
+    )
+    second = quote(
+        instrument_id=instrument_id,
+        instrument_type=InstrumentType.ETF,
+        last_price=1.18,
+        open=1.17,
+        high=1.19,
+        low=1.16,
+        pre_close=1.16,
+        source="tencent",
+    )
+    level = QualityLevel(quality)
+    quality_decision = QualityDecision(
+        instrument_id=instrument_id,
+        level=level,
+        reasons=(),
+        canonical_quote=first,
+        source_quotes=(first, second),
+    )
+    return InstrumentContext(
+        instrument_id=instrument_id,
+        name=f"ETF-{instrument_id}",
+        instrument_type=InstrumentType.ETF,
+        quality=quality_decision,
+        quote=first,
+        historical={
+            "avg_amount_20d": amount,
+            "latest_amount": amount,
+            "return_5d_pct": 1.0,
+            "net_mf_amount": amount * 0.02,
+            "daily_gain_pct": 1.0,
+        },
+        intraday={
+            "production_ready": True,
+            "tail_return_pct": tail_return_pct,
+            "vwap_distance_pct": vwap_distance_pct,
+            "range_position": 0.8,
+            "volume_ratio": 1.2,
+        },
+        events={},
+        metadata={
+            "lot_size": 100,
+            "tracking_index": "fixture-index",
+            "premium_proxy_pct": 0.0,
+            "nav_age_minutes": 1,
+            "underlying_market_open": True,
+            "theme": instrument_id,
+        },
+    )

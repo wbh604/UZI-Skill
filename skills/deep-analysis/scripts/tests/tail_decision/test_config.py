@@ -16,6 +16,8 @@ def test_default_config_uses_one_shared_8000_exposure_cap():
     assert config.max_instrument_exposure == 4_000.0
     assert config.max_etf_candidates == 2
     assert config.max_stock_candidates == 2
+    assert config.min_etf_daily_amount == 50_000_000.0
+    assert config.max_etf_premium_pct == 1.0
 
 
 def test_config_rejects_exposure_above_assets():

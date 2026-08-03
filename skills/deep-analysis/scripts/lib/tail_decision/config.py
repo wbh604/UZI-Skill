@@ -17,6 +17,10 @@ class DecisionConfig:
     max_instrument_exposure: float = 4_000.0
     max_etf_candidates: int = 2
     max_stock_candidates: int = 2
+    min_etf_daily_amount: float = 50_000_000.0
+    max_etf_premium_pct: float = 1.0
+    etf_nav_stale_minutes: int = 30
+    etf_excessive_daily_gain_pct: float = 5.0
     max_quote_age_seconds: int = 60
     max_price_deviation_pct: float = 0.3
     min_sources_for_recommendation: int = 2
@@ -45,6 +49,7 @@ class DecisionConfig:
         for field_name in (
             "max_etf_candidates",
             "max_stock_candidates",
+            "etf_nav_stale_minutes",
             "max_quote_age_seconds",
             "min_sources_for_recommendation",
             "stock_lot_size",
@@ -55,6 +60,8 @@ class DecisionConfig:
 
         for field_name in (
             "max_price_deviation_pct",
+            "max_etf_premium_pct",
+            "etf_excessive_daily_gain_pct",
             "stock_commission_rate",
             "etf_commission_rate",
             "minimum_commission",
@@ -64,6 +71,9 @@ class DecisionConfig:
         ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must be non-negative")
+
+        if self.min_etf_daily_amount <= 0:
+            raise ValueError("min_etf_daily_amount must be positive")
 
         decision_start = _parse_time(self.decision_start, "decision_start")
         final_decision_time = _parse_time(
