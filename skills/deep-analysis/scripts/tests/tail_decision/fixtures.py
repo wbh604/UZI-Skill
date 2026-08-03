@@ -4,7 +4,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from lib.tail_decision.contracts import (
+    Allocation,
     Candidate,
+    DecisionRun,
+    DecisionStatus,
     InstrumentContext,
     InstrumentType,
     QualityDecision,
@@ -199,4 +202,36 @@ def stock_context(
             "limit_up": limit_up,
             "theme": "fixture-sector",
         },
+    )
+
+
+def decision_run(*, run_id: str) -> DecisionRun:
+    etf = candidate("513050.SH", kind="etf", price=1.18, lot_size=100, score=80)
+    stock = candidate("600406.SH", kind="stock", price=25.0, lot_size=100, score=78)
+    return DecisionRun(
+        run_id=run_id,
+        as_of=datetime(2026, 8, 3, 14, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+        status=DecisionStatus.RECOMMENDED,
+        quality=(),
+        etf_candidates=(etf,),
+        stock_candidates=(stock,),
+        allocations=(
+            Allocation(
+                instrument_id="513050.SH",
+                quantity=3_300,
+                limit_price=1.18,
+                notional=3_894.0,
+                candidate_score=80.0,
+            ),
+            Allocation(
+                instrument_id="600406.SH",
+                quantity=100,
+                limit_price=25.0,
+                notional=2_500.0,
+                candidate_score=78.0,
+            ),
+        ),
+        reasons=("dual_source_quotes_passed",),
+        strategy_version="tail-v1",
+        config_hash="fixture-config-hash",
     )
