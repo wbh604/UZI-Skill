@@ -49,12 +49,58 @@ class ArchiveReader:
                     f"no partition for dataset {dataset!r} at or before {as_of}"
                 )
             return pd.DataFrame()
-        try:
-            if partition.name.lower().endswith(".parquet"):
-                return pd.read_parquet(partition)
-            return pd.read_csv(partition)
-        except Exception as exc:
-            raise ArchiveDataError(f"failed to read archive partition: {partition}") from exc
+        return _read_frame(partition)
+
+    def read_recent(
+        self,
+        dataset: str,
+        as_of: date | datetime,
+        partition_count: int,
+        *,
+        required: bool = True,
+    ) -> pd.DataFrame:
+        if partition_count <= 0:
+            raise ValueError("partition_count must be positive")
+        selected = self._dated_partitions(dataset, as_of)[-partition_count:]
+        if not selected:
+            if required:
+                raise ArchiveDataError(
+                    f"no dated partitions for dataset {dataset!r} at or before {as_of}"
+                )
+            return pd.DataFrame()
+
+        frames: list[pd.DataFrame] = []
+        for partition_date, _, path in selected:
+            frame = _read_frame(path)
+            frame["_archive_partition"] = partition_date.strftime("%Y%m%d")
+            frames.append(frame)
+        return pd.concat(frames, ignore_index=True, sort=False)
+
+    def read_static(
+        self,
+        dataset: str,
+        candidates: tuple[str, ...],
+        *,
+        required: bool = True,
+    ) -> pd.DataFrame:
+        dataset_root = self._dataset_root(dataset)
+        for candidate in candidates:
+            candidate_path = Path(candidate)
+            if (
+                not candidate
+                or candidate_path.is_absolute()
+                or len(candidate_path.parts) != 1
+                or candidate in {".", ".."}
+            ):
+                raise ValueError(f"invalid static candidate name: {candidate!r}")
+            path = dataset_root / candidate
+            if path.is_file() and _is_supported(path):
+                return _read_frame(path)
+        if required:
+            raise ArchiveDataError(
+                f"no static candidate for dataset {dataset!r}: {candidates!r}"
+            )
+        return pd.DataFrame()
 
     def read_trade_dates(
         self, start: date | datetime, end: date | datetime
@@ -101,10 +147,37 @@ class ArchiveReader:
             raise ValueError(f"invalid dataset name: {dataset!r}")
         return self.root / "normalized" / dataset
 
+    def _dated_partitions(
+        self,
+        dataset: str,
+        as_of: date | datetime,
+    ) -> list[tuple[date, str, Path]]:
+        dataset_root = self._dataset_root(dataset)
+        if not dataset_root.is_dir():
+            return []
+        cutoff = as_of.date() if isinstance(as_of, datetime) else as_of
+        eligible: list[tuple[date, str, Path]] = []
+        for path in dataset_root.iterdir():
+            if not path.is_file() or not _is_supported(path):
+                continue
+            partition_date = _partition_date(path)
+            if partition_date is not None and partition_date <= cutoff:
+                eligible.append((partition_date, path.name, path))
+        return sorted(eligible)
+
 
 def _is_supported(path: Path) -> bool:
     name = path.name.lower()
     return name.endswith((".csv", ".csv.gz", ".parquet"))
+
+
+def _read_frame(path: Path) -> pd.DataFrame:
+    try:
+        if path.name.lower().endswith(".parquet"):
+            return pd.read_parquet(path)
+        return pd.read_csv(path)
+    except Exception as exc:
+        raise ArchiveDataError(f"failed to read archive partition: {path}") from exc
 
 
 def _partition_date(path: Path) -> date | None:
