@@ -40,6 +40,22 @@ def candidate(
     )
 
 
+def allocation(
+    instrument_id: str,
+    *,
+    quantity: int,
+    limit_price: float,
+    score: float = 80.0,
+) -> Allocation:
+    return Allocation(
+        instrument_id=instrument_id,
+        quantity=quantity,
+        limit_price=limit_price,
+        notional=quantity * limit_price,
+        candidate_score=score,
+    )
+
+
 def quote(**overrides) -> QuoteSnapshot:
     now = datetime(2026, 8, 3, 14, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
     values = {
