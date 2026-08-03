@@ -251,3 +251,69 @@ def decision_run(*, run_id: str) -> DecisionRun:
         strategy_version="tail-v1",
         config_hash="fixture-config-hash",
     )
+
+
+class _FixtureGateway:
+    def __init__(
+        self,
+        *,
+        all_providers_fail: bool,
+        single_source: bool,
+        no_candidates: bool,
+    ) -> None:
+        self.all_providers_fail = all_providers_fail
+        self.single_source = single_source
+        self.no_candidates = no_candidates
+
+    def collect(self, *, as_of, phase):
+        from lib.tail_decision.workflow import WorkflowInputs
+
+        if self.all_providers_fail:
+            return WorkflowInputs(system_errors=("all_quote_providers_failed",))
+        if self.no_candidates:
+            return WorkflowInputs()
+
+        etf = etf_context(
+            "513050.SH",
+            amount=2_000_000_000.0,
+            tail_return_pct=1.2,
+            vwap_distance_pct=0.4,
+            quality="degraded" if self.single_source else "pass",
+        )
+        stock = stock_context(
+            "600406.SH",
+            price=25.0,
+            name="fixture-stock",
+            tail_return_pct=1.0,
+        )
+        contexts = (etf,) if self.single_source else (etf, stock)
+        return WorkflowInputs(
+            quality=tuple(context.quality for context in contexts),
+            etf_contexts=(etf,),
+            stock_contexts=() if self.single_source else (stock,),
+            raw_quotes={"phase": phase, "as_of": as_of.isoformat()},
+        )
+
+
+def workflow_dependencies(
+    *,
+    all_providers_fail: bool = False,
+    single_source: bool = False,
+    no_candidates: bool = False,
+):
+    from lib.tail_decision.config import DecisionConfig
+    from lib.tail_decision.etf_strategy import rank_etfs
+    from lib.tail_decision.portfolio import allocate_portfolio
+    from lib.tail_decision.stock_strategy import rank_overnight_stocks
+
+    return {
+        "config": DecisionConfig(),
+        "gateway": _FixtureGateway(
+            all_providers_fail=all_providers_fail,
+            single_source=single_source,
+            no_candidates=no_candidates,
+        ),
+        "etf_ranker": rank_etfs,
+        "stock_ranker": rank_overnight_stocks,
+        "allocator": allocate_portfolio,
+    }
