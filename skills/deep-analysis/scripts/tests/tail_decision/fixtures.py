@@ -4,12 +4,37 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from lib.tail_decision.contracts import (
+    Candidate,
     InstrumentContext,
     InstrumentType,
     QualityDecision,
     QualityLevel,
     QuoteSnapshot,
 )
+
+
+def candidate(
+    instrument_id: str,
+    *,
+    kind: str,
+    price: float,
+    lot_size: int,
+    score: float,
+    theme: str | None = None,
+) -> Candidate:
+    instrument_type = InstrumentType(kind)
+    return Candidate(
+        instrument_id=instrument_id,
+        name=f"{kind}-{instrument_id}",
+        instrument_type=instrument_type,
+        score=float(score),
+        max_buy_price=float(price),
+        lot_size=lot_size,
+        reasons=("fixture",),
+        rejections=(),
+        exit_plan={"exit_session": "next_trading_day"},
+        theme=theme or instrument_id,
+    )
 
 
 def quote(**overrides) -> QuoteSnapshot:
