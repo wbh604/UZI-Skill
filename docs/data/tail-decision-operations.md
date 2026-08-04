@@ -112,3 +112,11 @@ Get-Content ledger/events.jsonl -Tail 20
 ```
 
 放行状态在 60 个不同交易日且至少 40 笔模拟入场之前固定为 `collecting`。达到样本门槛后，还必须同时满足净收益为正、Profit Factor 不低于 1.2、最大回撤不超过账户资产的 8%，且模拟进出场均能追溯到保存的行情来源，才会变为 `eligible`。
+
+调度健康检查：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_tail_decision_tasks.ps1
+```
+
+健康检查必须同时确认七个精确任务名、CLI 路径、阶段参数、状态目录、触发时间和上次运行结果。Windows 状态 `267011` 仅表示新任务尚未首次运行，允许通过；其他非零执行结果仍会失败。

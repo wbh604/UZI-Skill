@@ -32,6 +32,7 @@ if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
 }
 
 $DataRoot = [System.IO.Path]::GetFullPath("D:\work\gupiao\data\tushare_calendar")
+$StateRoot = [System.IO.Path]::GetFullPath("D:\work\gupiao\data\tail_decision_runtime")
 $LogRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $ProjectRoot "reports\tail_decision\scheduler")
 )
@@ -40,6 +41,7 @@ if (-not $LogRoot.StartsWith($ProjectRoot, [System.StringComparison]::OrdinalIgn
 }
 if (-not $WhatIf) {
     New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
 }
 
 $TaskSpecs = @(
@@ -61,6 +63,7 @@ $QuotedPython = ConvertTo-PowerShellLiteral $PythonPath
 $QuotedCli = ConvertTo-PowerShellLiteral $CliPath
 $QuotedDataRoot = ConvertTo-PowerShellLiteral $DataRoot
 $QuotedOutputRoot = ConvertTo-PowerShellLiteral $ProjectRoot
+$QuotedStateRoot = ConvertTo-PowerShellLiteral $StateRoot
 $PowerShellPath = (Get-Command powershell.exe -ErrorAction Stop).Source
 $Weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
 
@@ -69,13 +72,14 @@ foreach ($Spec in $TaskSpecs) {
     $QuotedLog = ConvertTo-PowerShellLiteral $LogPath
     $CliArguments = (
         "$QuotedCli --phase $($Spec.Phase) --data-root $QuotedDataRoot " +
-        "--output-root $QuotedOutputRoot"
+        "--output-root $QuotedOutputRoot --state-root $QuotedStateRoot"
     )
-    $Invocation = "& $QuotedPython $CliArguments *>> $QuotedLog"
+    $Invocation = "& $QuotedPython $CliArguments *>> $QuotedLog; exit `$LASTEXITCODE"
 
     if ($WhatIf) {
         Write-Output (
-            "WHATIF $($Spec.Name) $($Spec.Time) $CliPath --phase $($Spec.Phase)"
+            "WHATIF $($Spec.Name) $($Spec.Time) $CliPath --phase $($Spec.Phase) " +
+            "--state-root $StateRoot"
         )
         continue
     }

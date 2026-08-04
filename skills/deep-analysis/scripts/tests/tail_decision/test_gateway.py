@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
@@ -197,3 +198,38 @@ def test_gateway_treats_unknown_announcement_status_as_adverse(tmp_path):
         "adverse_event": True,
         "risk_titles": (),
     }
+
+
+class _PreviousDayProvider(_QuoteProvider):
+    def fetch_quotes(self, ids, now):
+        return {
+            instrument_id: replace(
+                item,
+                timestamp=item.timestamp - timedelta(days=1),
+            )
+            for instrument_id, item in super().fetch_quotes(ids, now).items()
+        }
+
+
+def test_gateway_persists_mixed_quote_dates_without_cross_day_append_failure(tmp_path):
+    gateway = CredentialFreeGateway(
+        config=DecisionConfig(),
+        archive_reader=_Archive(),
+        snapshot_store=QuoteSnapshotStore(tmp_path),
+        quote_providers=(
+            _QuoteProvider("eastmoney", 0.0),
+            _PreviousDayProvider("tencent", 0.001),
+        ),
+        announcement_provider=_Announcements(),
+        universe_override=Universe(
+            etfs=("510300.SH",),
+            stocks=("600001.SH",),
+        ),
+    )
+
+    inputs = gateway.collect(as_of=_at(14, 30), phase="final")
+
+    assert len(inputs.quality) == 2
+    snapshot_root = tmp_path / "cache" / "tail_decision" / "snapshots"
+    assert (snapshot_root / "20260803.jsonl").is_file()
+    assert (snapshot_root / "20260804.jsonl").is_file()

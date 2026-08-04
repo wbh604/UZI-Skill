@@ -58,7 +58,7 @@ class CredentialFreeGateway:
 
         quotes = fetch_from_providers(self.quote_providers, instrument_ids, as_of)
         if any(quotes.values()):
-            self.snapshot_store.append(phase=phase, quotes=quotes)
+            self._append_quotes_by_date(phase=phase, quotes=quotes, as_of=as_of)
 
         quality = tuple(
             evaluate_quote_quality(
@@ -117,6 +117,17 @@ class CredentialFreeGateway:
                 "quotes": quotes,
             },
         )
+
+    def _append_quotes_by_date(self, *, phase: str, quotes, as_of: datetime) -> None:
+        grouped: dict[str, dict[str, list[object]]] = {}
+        for instrument_id, snapshots in quotes.items():
+            for snapshot in snapshots:
+                day = snapshot.timestamp.astimezone(as_of.tzinfo).strftime("%Y%m%d")
+                grouped.setdefault(day, {}).setdefault(instrument_id, []).append(
+                    snapshot
+                )
+        for day in sorted(grouped):
+            self.snapshot_store.append(phase=phase, quotes=grouped[day])
 
     def _read_archive(self, as_of: datetime) -> dict[str, pd.DataFrame]:
         return {
