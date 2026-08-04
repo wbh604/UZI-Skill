@@ -86,4 +86,8 @@ def test_final_cli_advances_the_append_only_paper_ledger(tmp_path):
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["ledger_events"] == 1
+    assert payload["forward_release_state"] == "collecting"
     assert (state_root / "ledger" / "events.jsonl").is_file()
+    assert (
+        tmp_path / "output" / "reports" / "tail_decision" / "forward" / "latest.json"
+    ).is_file()

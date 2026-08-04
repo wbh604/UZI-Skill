@@ -92,3 +92,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_tail_decisio
 
 - `final` 追加 `plan_created`，`close` 依据通过质量门的收盘快照追加 `paper_entry` 或 `paper_entry_unfilled`，`exit_open` 追加退出提示，`exit_check` 追加 `paper_exit` 或 `paper_exit_blocked`。
 - 股票模拟退出严格执行 T+1。历史事件只追加不修改；同一运行重试使用确定性事件键去重。
+
+## 前向验证检查
+
+`final` 与 `exit_check` 会更新前向验证记录和最新报告：
+
+```text
+<output-root>/reports/tail_decision/forward/days.jsonl
+<output-root>/reports/tail_decision/forward/latest.json
+<output-root>/reports/tail_decision/forward/latest.md
+```
+
+PowerShell 检查命令：
+
+```powershell
+Get-Content reports/tail_decision/forward/latest.json
+Get-Content reports/tail_decision/forward/latest.md
+Get-Content ledger/events.jsonl -Tail 20
+```
+
+放行状态在 60 个不同交易日且至少 40 笔模拟入场之前固定为 `collecting`。达到样本门槛后，还必须同时满足净收益为正、Profit Factor 不低于 1.2、最大回撤不超过账户资产的 8%，且模拟进出场均能追溯到保存的行情来源，才会变为 `eligible`。

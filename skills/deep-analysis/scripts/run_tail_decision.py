@@ -21,6 +21,7 @@ from lib.tail_decision.contracts import (
 from lib.tail_decision.etf_strategy import rank_etfs
 from lib.tail_decision.event_risk import EastmoneyAnnouncementProvider
 from lib.tail_decision.free_quotes import EastmoneyQuoteProvider, TencentQuoteProvider
+from lib.tail_decision.forward import ForwardJournal
 from lib.tail_decision.gateway import CredentialFreeGateway
 from lib.tail_decision.phase_ledger import PhaseLedger
 from lib.tail_decision.portfolio import allocate_portfolio
@@ -198,12 +199,14 @@ def main(argv: list[str] | None = None) -> int:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must include a UTC offset")
         state_root = args.state_root or args.output_root
+        archive_reader = None
         if args.offline_fixture:
             gateway = _OfflineGateway(config)
         else:
+            archive_reader = ArchiveReader(args.data_root)
             gateway = CredentialFreeGateway(
                 config=config,
-                archive_reader=ArchiveReader(args.data_root),
+                archive_reader=archive_reader,
                 snapshot_store=QuoteSnapshotStore(state_root),
                 quote_providers=(
                     EastmoneyQuoteProvider(max_workers=8),
@@ -243,6 +246,44 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 2
+        forward_release_state = "not_recorded"
+        if args.phase in {"final", "exit_check"}:
+            try:
+                is_trading_day = (
+                    as_of.weekday() < 5
+                    if archive_reader is None
+                    else bool(
+                        archive_reader.read_trade_dates(as_of.date(), as_of.date())
+                    )
+                )
+                forward = ForwardJournal(
+                    args.output_root, account_assets=config.account_assets
+                )
+                forward.record_day(
+                    run,
+                    ledger_events,
+                    is_trading_day=is_trading_day,
+                )
+                forward_release_state = str(forward.summary()["release_state"])
+            except Exception as exc:
+                print(
+                    f"forward-journal failure: {type(exc).__name__}",
+                    file=sys.stderr,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "run_id": run.run_id,
+                            "phase": args.phase,
+                            "status": "blocked",
+                            "ledger_events": len(ledger_events),
+                            "reasons": ["forward_journal_failure"],
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                )
+                return 2
     except ValueError as exc:
         print(f"invalid configuration: {exc}", file=sys.stderr)
         print(json.dumps({"status": "blocked", "reasons": ["invalid_configuration"]}))
@@ -268,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
             for item in run.allocations
         ],
         "ledger_events": len(ledger_events),
+        "forward_release_state": forward_release_state,
         "reasons": list(run.reasons),
     }
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
