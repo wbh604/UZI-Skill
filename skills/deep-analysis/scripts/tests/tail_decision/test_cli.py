@@ -58,3 +58,32 @@ def test_cli_accepts_a_separate_forward_state_root(tmp_path):
     )
 
     assert args.state_root == state_root
+
+
+def test_final_cli_advances_the_append_only_paper_ledger(tmp_path):
+    state_root = tmp_path / "state"
+    command = [
+        sys.executable,
+        "skills/deep-analysis/scripts/run_tail_decision.py",
+        "--phase",
+        "final",
+        "--as-of",
+        "2026-08-04T14:30:00+08:00",
+        "--offline-fixture",
+        "--output-root",
+        str(tmp_path / "output"),
+        "--state-root",
+        str(state_root),
+    ]
+
+    completed = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["ledger_events"] == 1
+    assert (state_root / "ledger" / "events.jsonl").is_file()

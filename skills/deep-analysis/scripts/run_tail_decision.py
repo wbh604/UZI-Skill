@@ -22,6 +22,7 @@ from lib.tail_decision.etf_strategy import rank_etfs
 from lib.tail_decision.event_risk import EastmoneyAnnouncementProvider
 from lib.tail_decision.free_quotes import EastmoneyQuoteProvider, TencentQuoteProvider
 from lib.tail_decision.gateway import CredentialFreeGateway
+from lib.tail_decision.phase_ledger import PhaseLedger
 from lib.tail_decision.portfolio import allocate_portfolio
 from lib.tail_decision.quality import evaluate_quote_quality
 from lib.tail_decision.recorder import DecisionRecorder
@@ -196,10 +197,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must include a UTC offset")
+        state_root = args.state_root or args.output_root
         if args.offline_fixture:
             gateway = _OfflineGateway(config)
         else:
-            state_root = args.state_root or args.output_root
             gateway = CredentialFreeGateway(
                 config=config,
                 archive_reader=ArchiveReader(args.data_root),
@@ -222,6 +223,26 @@ def main(argv: list[str] | None = None) -> int:
             recorder=DecisionRecorder(args.output_root),
         )
         run = workflow.run(as_of=as_of, phase=args.phase)
+        try:
+            ledger_events = PhaseLedger(
+                state_root, config=config
+            ).advance(phase=args.phase, run=run)
+        except Exception as exc:
+            print(f"paper-ledger failure: {type(exc).__name__}", file=sys.stderr)
+            print(
+                json.dumps(
+                    {
+                        "run_id": run.run_id,
+                        "phase": args.phase,
+                        "status": "blocked",
+                        "ledger_events": 0,
+                        "reasons": ["paper_ledger_failure"],
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
+            return 2
     except ValueError as exc:
         print(f"invalid configuration: {exc}", file=sys.stderr)
         print(json.dumps({"status": "blocked", "reasons": ["invalid_configuration"]}))
@@ -246,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             }
             for item in run.allocations
         ],
+        "ledger_events": len(ledger_events),
         "reasons": list(run.reasons),
     }
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

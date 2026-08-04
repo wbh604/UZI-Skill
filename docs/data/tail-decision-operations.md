@@ -79,3 +79,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_tail_decisio
 ## 当前安全限制
 
 免费生产网关已具备双源行情和质量门，但在本地尾盘快照序列及历史特征尚未接入生产上下文时，会把 `production_ready` 保持为假并拒绝生成实盘组合。`close`、`exit_open`、`exit_check` 当前只保留阶段审计，持久化退出账本仍需后续里程碑完成。离线固定样本仅用于验收，不代表真实可交易信号。
+
+## 统一择优与模拟账本
+
+- ETF 和隔夜个股仍分别生成候选与拒绝原因，但最终账户方案只选择一个分数最高且可成交的标的；没有合格标的时保持空仓。
+- `--state-root` 用于保存不随报告目录变化的前向状态；未指定时默认使用 `--output-root`。
+- 阶段账本只记录模拟生命周期，不代表真实委托或真实成交：
+
+```text
+<state-root>/ledger/events.jsonl
+```
+
+- `final` 追加 `plan_created`，`close` 依据通过质量门的收盘快照追加 `paper_entry` 或 `paper_entry_unfilled`，`exit_open` 追加退出提示，`exit_check` 追加 `paper_exit` 或 `paper_exit_blocked`。
+- 股票模拟退出严格执行 T+1。历史事件只追加不修改；同一运行重试使用确定性事件键去重。
