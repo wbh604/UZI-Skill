@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 import sys
+import threading
 from zoneinfo import ZoneInfo
 
 SCRIPTS = Path(__file__).resolve().parents[2]
@@ -70,3 +71,59 @@ def test_provider_failure_does_not_discard_other_source():
 
     result = fetch_from_providers([Bad(), Good()], ["600406.SH"], NOW)
     assert [quote.source for quote in result["600406.SH"]] == ["eastmoney"]
+
+
+def test_eastmoney_fetches_instruments_with_bounded_concurrency():
+    barrier = threading.Barrier(2)
+
+    class Response:
+        def __init__(self, code):
+            self.code = code
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": {
+                    "f57": self.code,
+                    "f58": "fixture",
+                    "f43": 1000,
+                    "f59": 2,
+                    "f46": 990,
+                    "f44": 1010,
+                    "f45": 980,
+                    "f60": 990,
+                    "f47": 1000,
+                    "f48": 1_000_000,
+                    "f124": int(NOW.timestamp()),
+                }
+            }
+
+    class Session:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.active = 0
+            self.max_active = 0
+
+        def get(self, url, *, params, headers, timeout):
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            try:
+                try:
+                    barrier.wait(timeout=0.2)
+                except threading.BrokenBarrierError:
+                    pass
+                return Response(params["secid"].split(".", 1)[1])
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    session = Session()
+    provider = EastmoneyQuoteProvider(session=session, max_workers=8)
+
+    quotes = provider.fetch_quotes(("600001.SH", "600002.SH"), NOW)
+
+    assert set(quotes) == {"600001.SH", "600002.SH"}
+    assert session.max_active == 2

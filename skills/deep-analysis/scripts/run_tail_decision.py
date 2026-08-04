@@ -8,9 +8,9 @@ from datetime import datetime
 import json
 from pathlib import Path
 import sys
-from typing import Any
 from zoneinfo import ZoneInfo
 
+from lib.tail_decision.archive import ArchiveReader
 from lib.tail_decision.config import DecisionConfig
 from lib.tail_decision.contracts import (
     DecisionStatus,
@@ -19,17 +19,20 @@ from lib.tail_decision.contracts import (
     QuoteSnapshot,
 )
 from lib.tail_decision.etf_strategy import rank_etfs
+from lib.tail_decision.event_risk import EastmoneyAnnouncementProvider
+from lib.tail_decision.free_quotes import EastmoneyQuoteProvider, TencentQuoteProvider
+from lib.tail_decision.gateway import CredentialFreeGateway
 from lib.tail_decision.portfolio import allocate_portfolio
 from lib.tail_decision.quality import evaluate_quote_quality
 from lib.tail_decision.recorder import DecisionRecorder
+from lib.tail_decision.snapshot_store import QuoteSnapshotStore
 from lib.tail_decision.stock_strategy import rank_overnight_stocks
+from lib.tail_decision.universe import load_universe_override
 from lib.tail_decision.workflow import TailDecisionWorkflow, WorkflowInputs
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_ROOT = PROJECT_ROOT.parent / "data" / "tushare_calendar"
-DEFAULT_ETFS = ("513050.SH",)
-DEFAULT_STOCKS = ("600406.SH",)
 
 
 class _OfflineGateway:
@@ -133,55 +136,6 @@ class _OfflineGateway:
         self.config = config
 
 
-class _CredentialFreeGateway:
-    def __init__(self, config: DecisionConfig, data_root: Path) -> None:
-        self.config = config
-        self.data_root = data_root
-        self.etfs, self.stocks = _load_universe(data_root)
-
-    def collect(self, *, as_of: datetime, phase: str) -> WorkflowInputs:
-        from lib.tail_decision.free_quotes import (
-            EastmoneyQuoteProvider,
-            TencentQuoteProvider,
-            fetch_from_providers,
-        )
-
-        instrument_ids = (*self.etfs, *self.stocks)
-        quotes = fetch_from_providers(
-            (EastmoneyQuoteProvider(), TencentQuoteProvider()),
-            instrument_ids,
-            as_of,
-        )
-        quality = tuple(
-            evaluate_quote_quality(
-                instrument_id,
-                quotes[instrument_id],
-                as_of,
-                self.config,
-            )
-            for instrument_id in instrument_ids
-        )
-        quality_by_id = {item.instrument_id: item for item in quality}
-        etf_contexts = tuple(
-            _live_context(instrument_id, InstrumentType.ETF, quality_by_id[instrument_id])
-            for instrument_id in self.etfs
-        )
-        stock_contexts = tuple(
-            _live_context(
-                instrument_id,
-                InstrumentType.STOCK,
-                quality_by_id[instrument_id],
-            )
-            for instrument_id in self.stocks
-        )
-        return WorkflowInputs(
-            quality=quality,
-            etf_contexts=etf_contexts,
-            stock_contexts=stock_contexts,
-            raw_quotes={"mode": "credential_free", "phase": phase, "quotes": quotes},
-        )
-
-
 def _fixture_quotes(
     instrument_id: str,
     instrument_type: InstrumentType,
@@ -210,51 +164,6 @@ def _fixture_quotes(
     )
 
 
-def _live_context(instrument_id, instrument_type, quality) -> InstrumentContext:
-    quote = quality.canonical_quote
-    amount = quote.amount if quote is not None else 0.0
-    metadata: dict[str, Any] = {"lot_size": 100}
-    events: dict[str, Any] = {}
-    if instrument_type is InstrumentType.ETF:
-        metadata.update(
-            tracking_index="local-universe",
-            premium_proxy_pct=None,
-            theme=instrument_id,
-        )
-    else:
-        metadata.update(
-            is_st=False,
-            delisting=False,
-            suspended=False,
-            listing_days=365,
-            theme=instrument_id,
-        )
-        events["adverse_event"] = True
-    return InstrumentContext(
-        instrument_id=instrument_id,
-        name=instrument_id,
-        instrument_type=instrument_type,
-        quality=quality,
-        quote=quote,
-        historical={"avg_amount_20d": amount, "latest_amount": amount},
-        intraday={"production_ready": False},
-        events=events,
-        metadata=metadata,
-    )
-
-
-def _load_universe(data_root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    universe_path = data_root / "tail_decision_universe.json"
-    if not universe_path.is_file():
-        return DEFAULT_ETFS, DEFAULT_STOCKS
-    payload = json.loads(universe_path.read_text(encoding="utf-8"))
-    etfs = tuple(str(item) for item in payload.get("etfs", ()))
-    stocks = tuple(str(item) for item in payload.get("stocks", ()))
-    if not etfs and not stocks:
-        raise ValueError("tail-decision universe is empty")
-    return etfs, stocks
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -265,6 +174,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of")
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--output-root", type=Path, default=PROJECT_ROOT)
+    parser.add_argument("--state-root", type=Path)
     parser.add_argument("--account-assets", type=float, default=10_000.0)
     parser.add_argument("--max-exposure", type=float, default=8_000.0)
     parser.add_argument("--offline-fixture", action="store_true")
@@ -286,11 +196,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must include a UTC offset")
-        gateway = (
-            _OfflineGateway(config)
-            if args.offline_fixture
-            else _CredentialFreeGateway(config, args.data_root)
-        )
+        if args.offline_fixture:
+            gateway = _OfflineGateway(config)
+        else:
+            state_root = args.state_root or args.output_root
+            gateway = CredentialFreeGateway(
+                config=config,
+                archive_reader=ArchiveReader(args.data_root),
+                snapshot_store=QuoteSnapshotStore(state_root),
+                quote_providers=(
+                    EastmoneyQuoteProvider(max_workers=8),
+                    TencentQuoteProvider(),
+                ),
+                announcement_provider=EastmoneyAnnouncementProvider(),
+                universe_override=load_universe_override(
+                    args.data_root / "tail_decision_universe.json"
+                ),
+            )
         workflow = TailDecisionWorkflow(
             config=config,
             gateway=gateway,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import re
 from typing import Iterable, Protocol, Sequence
@@ -51,9 +52,17 @@ class EastmoneyQuoteProvider:
     endpoint = "https://push2.eastmoney.com/api/qt/stock/get"
     fields = "f43,f44,f45,f46,f47,f48,f57,f58,f59,f60,f124"
 
-    def __init__(self, session: requests.Session | None = None, timeout: float = 8.0):
+    def __init__(
+        self,
+        session: requests.Session | None = None,
+        timeout: float = 8.0,
+        max_workers: int = 8,
+    ):
+        if max_workers <= 0 or max_workers > 8:
+            raise ValueError("max_workers must be between 1 and 8")
         self.session = session or requests.Session()
         self.timeout = timeout
+        self.max_workers = max_workers
 
     @staticmethod
     def parse_payload(
@@ -90,18 +99,34 @@ class EastmoneyQuoteProvider:
         self, ids: Sequence[str], now: datetime
     ) -> dict[str, QuoteSnapshot]:
         quotes: dict[str, QuoteSnapshot] = {}
-        for instrument_id in ids:
-            response = self.session.get(
-                self.endpoint,
-                params={"secid": _eastmoney_secid(instrument_id), "fields": self.fields},
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            quotes[instrument_id] = self.parse_payload(
-                instrument_id, response.json(), now
-            )
+        requested = tuple(dict.fromkeys(ids))
+        if not requested:
+            return quotes
+        with ThreadPoolExecutor(
+            max_workers=min(self.max_workers, len(requested)),
+            thread_name_prefix="eastmoney-quote",
+        ) as executor:
+            futures = {
+                executor.submit(self._fetch_one, instrument_id, now): instrument_id
+                for instrument_id in requested
+            }
+            for future in as_completed(futures):
+                instrument_id = futures[future]
+                try:
+                    quotes[instrument_id] = future.result()
+                except Exception:
+                    continue
         return quotes
+
+    def _fetch_one(self, instrument_id: str, now: datetime) -> QuoteSnapshot:
+        response = self.session.get(
+            self.endpoint,
+            params={"secid": _eastmoney_secid(instrument_id), "fields": self.fields},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return self.parse_payload(instrument_id, response.json(), now)
 
 
 class TencentQuoteProvider:
