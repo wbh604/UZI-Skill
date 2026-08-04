@@ -4,6 +4,8 @@
 
 **Goal:** Close the production gaps left after the no-token offline acceptance so the local CLI can build real ETF and overnight-stock contexts, maintain next-session paper exits, and start auditable forward validation without Tushare or Codex.
 
+**2026-08-04 unified-selection amendment:** The approved design amendment in `docs/superpowers/specs/2026-08-04-unified-best-candidate-selection-design.md` supersedes any step that allocates one ETF plus one stock. Candidate generation remains separate, but the account allocator must choose at most one best feasible candidate across both asset types, or return no-trade.
+
 **Architecture:** Keep the existing `lib/tail_decision` boundary and add four explicit local services: recent-archive access, a deterministic liquid universe, an append-only quote snapshot store, and an append-only paper-position ledger. A credential-free production gateway composes those services with the existing Eastmoney/Tencent adapters and conservative announcement risk checks; the CLI remains the only entry point, while Windows Task Scheduler drives phases and a forward journal measures readiness.
 
 **Tech Stack:** Python 3.11+, pandas, requests, pytest, standard-library dataclasses/json/pathlib/concurrent.futures, PowerShell ScheduledTasks.

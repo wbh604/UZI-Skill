@@ -7,7 +7,7 @@ from math import isfinite
 from typing import Iterable
 
 from .config import DecisionConfig
-from .contracts import Allocation, Candidate, InstrumentType
+from .contracts import Allocation, Candidate
 
 
 def allocate_portfolio(
@@ -15,7 +15,7 @@ def allocate_portfolio(
     stocks: Iterable[Candidate],
     config: DecisionConfig,
 ) -> tuple[list[Allocation], list[str]]:
-    """Allocate at most one ETF and one stock under one shared cash cap."""
+    """Allocate the single best feasible ETF or stock under shared cash caps."""
 
     candidates = sorted(
         [*etfs, *stocks],
@@ -26,16 +26,8 @@ def allocate_portfolio(
     remaining = total_budget
     allocations: list[Allocation] = []
     reasons: list[str] = []
-    used_types: set[InstrumentType] = set()
-    used_themes: set[str] = set()
 
     for item in candidates:
-        if item.instrument_type in used_types:
-            reasons.append(f"skipped_type_limit:{item.instrument_id}")
-            continue
-        if item.theme in used_themes:
-            reasons.append(f"skipped_duplicate_theme:{item.instrument_id}")
-            continue
         if item.rejections:
             reasons.append(f"skipped_rejected_candidate:{item.instrument_id}")
             continue
@@ -69,8 +61,8 @@ def allocate_portfolio(
             )
         )
         remaining -= notional
-        used_types.add(item.instrument_type)
-        used_themes.add(item.theme)
+        reasons.append(f"selected_best_candidate:{item.instrument_id}")
+        break
 
     if not allocations:
         reasons.append("no_affordable_candidate")
