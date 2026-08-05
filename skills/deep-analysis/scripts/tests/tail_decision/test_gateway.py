@@ -152,16 +152,50 @@ def broad_archive(stock_count=320):
     return archive
 
 
+def multi_etf_archive(stock_count=320, etf_count=12):
+    archive = broad_archive(stock_count)
+    etf_ids = tuple(f"{510300 + index:06d}.SH" for index in range(etf_count))
+    dates = pd.date_range("2026-07-06", periods=20, freq="B")
+    archive.fund_daily = pd.DataFrame([
+        {
+            "ts_code": instrument_id,
+            "trade_date": trade_date.strftime("%Y%m%d"),
+            "close": 1.2,
+            "amount": 800_000.0,
+        }
+        for instrument_id in etf_ids
+        for trade_date in dates
+    ])
+    original_read_latest = archive.read_latest
+
+    def read_latest(dataset, as_of, *, required=True):
+        if dataset == "etf_basic":
+            return pd.DataFrame([
+                {
+                    "ts_code": instrument_id,
+                    "csname": f"ETF {index}",
+                    "index_code": f"000{index:03d}.SH",
+                    "list_status": "L",
+                }
+                for index, instrument_id in enumerate(etf_ids)
+            ])
+        return original_read_latest(dataset, as_of, required=required)
+
+    archive.read_latest = read_latest
+    return archive, set(archive.stock_basic["ts_code"]), set(etf_ids)
+
+
 class _QuoteProvider:
-    def __init__(self, name: str, price_offset: float):
+    def __init__(self, name: str, price_offset: float, etf_ids=("510300.SH",)):
         self.name = name
         self.price_offset = price_offset
+        self.etf_ids = frozenset(etf_ids)
 
     def fetch_quotes(self, ids, now):
         step = 0.0 if now.minute == 0 else 0.02
         quotes = {}
         for instrument_id in ids:
-            is_etf = instrument_id == "510300.SH"
+            is_etf = instrument_id in self.etf_ids
             base = 1.2 if is_etf else 10.2
             price = base + step + self.price_offset
             quotes[instrument_id] = QuoteSnapshot(
@@ -182,8 +216,8 @@ class _QuoteProvider:
 
 
 class RecordingQuoteProvider(_QuoteProvider):
-    def __init__(self, name="eastmoney", price_offset=0.0):
-        super().__init__(name, price_offset)
+    def __init__(self, name="eastmoney", price_offset=0.0, etf_ids=("510300.SH",)):
+        super().__init__(name, price_offset, etf_ids)
         self.requested_ids = ()
 
     def fetch_quotes(self, ids, now):
@@ -192,8 +226,8 @@ class RecordingQuoteProvider(_QuoteProvider):
 
 
 class MatchingQuoteProvider(_QuoteProvider):
-    def __init__(self):
-        super().__init__("tencent", 0.001)
+    def __init__(self, etf_ids=("510300.SH",)):
+        super().__init__("tencent", 0.001, etf_ids)
 
 
 class _Announcements:
@@ -349,6 +383,24 @@ def test_gateway_quotes_only_observation_pool_and_audits_research_count(tmp_path
     assert inputs.raw_quotes["funnel_audit"]["research_stocks"] >= 300
     assert inputs.raw_quotes["funnel_audit"]["observation_stocks"] == 30
     assert len([item for item in provider.requested_ids if item.endswith((".SH", ".SZ")) and not item.startswith(("510", "159"))]) <= 30
+
+
+def test_gateway_requests_type_specific_observation_limits_for_multi_etf_archive(tmp_path):
+    archive, stock_ids, etf_ids = multi_etf_archive()
+    provider = RecordingQuoteProvider(etf_ids=etf_ids)
+    matching = RecordingQuoteProvider("tencent", 0.001, etf_ids)
+
+    production_gateway(
+        tmp_path,
+        archive=archive,
+        providers=(provider, matching),
+    ).collect(as_of=_at(14, 10), phase="preview")
+
+    requested = set(provider.requested_ids)
+    assert matching.requested_ids == provider.requested_ids
+    assert len(requested & stock_ids) <= 30
+    assert len(requested & etf_ids) <= 10
+    assert requested <= stock_ids | etf_ids
 
 
 def test_gateway_passes_aware_as_of_to_funnel(monkeypatch, tmp_path):
