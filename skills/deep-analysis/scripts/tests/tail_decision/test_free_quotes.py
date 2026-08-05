@@ -9,6 +9,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from lib.tail_decision.free_quotes import (
     EastmoneyQuoteProvider,
+    TencentQuoteProvider,
     fetch_from_providers,
 )
 
@@ -127,3 +128,75 @@ def test_eastmoney_fetches_instruments_with_bounded_concurrency():
 
     assert set(quotes) == {"600001.SH", "600002.SH"}
     assert session.max_active == 2
+
+
+def test_tencent_parser_skips_one_malformed_quote_without_discarding_batch():
+    def response(symbol, *, open_price):
+        parts = [""] * 50
+        parts[0] = "51"
+        parts[1] = "fixture"
+        parts[2] = symbol[2:]
+        parts[3] = "25.06"
+        parts[4] = "24.35"
+        parts[5] = str(open_price)
+        parts[6] = "1000"
+        parts[30] = "20260803141030"
+        parts[33] = "25.09"
+        parts[34] = "24.46"
+        parts[37] = "250.6"
+        return f'v_{symbol}="{"~".join(parts)}";'
+
+    valid = response("sh600406", open_price=24.48)
+    malformed = response("sh600407", open_price=0)
+
+    quotes = TencentQuoteProvider.parse_response(valid + malformed, NOW)
+
+    assert set(quotes) == {"600406.SH"}
+
+
+def test_eastmoney_retries_one_transient_request_failure():
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": {
+                    "f57": "600406",
+                    "f58": "fixture",
+                    "f43": 2506,
+                    "f59": 2,
+                    "f46": 2448,
+                    "f44": 2509,
+                    "f45": 2446,
+                    "f60": 2435,
+                    "f47": 1000,
+                    "f48": 2_506_000,
+                    "f124": int(NOW.timestamp()),
+                }
+            }
+
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, *, params, headers, timeout):
+            import requests
+
+            self.calls += 1
+            if self.calls == 1:
+                raise requests.exceptions.ProxyError("transient")
+            return Response()
+
+    session = Session()
+    provider = EastmoneyQuoteProvider(
+        session=session,
+        max_workers=1,
+        max_attempts=2,
+        retry_backoff_seconds=0,
+    )
+
+    quotes = provider.fetch_quotes(("600406.SH",), NOW)
+
+    assert set(quotes) == {"600406.SH"}
+    assert session.calls == 2

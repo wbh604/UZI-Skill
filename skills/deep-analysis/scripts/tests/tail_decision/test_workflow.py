@@ -5,8 +5,8 @@ import sys
 SCRIPTS = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SCRIPTS))
 
-from lib.tail_decision.contracts import DecisionStatus
-from lib.tail_decision.workflow import TailDecisionWorkflow
+from lib.tail_decision.contracts import DecisionStatus, QualityDecision, QualityLevel
+from lib.tail_decision.workflow import TailDecisionWorkflow, WorkflowInputs
 from .fixtures import workflow_dependencies
 
 
@@ -57,3 +57,37 @@ def test_passed_data_without_candidates_is_no_trade():
 
     assert result.status is DecisionStatus.NO_TRADE
     assert result.allocations == ()
+
+
+def test_one_unquoted_instrument_does_not_block_other_passed_candidates():
+    dependencies = workflow_dependencies()
+    base_gateway = dependencies["gateway"]
+
+    class PartialFailureGateway:
+        def collect(self, *, as_of, phase):
+            inputs = base_gateway.collect(as_of=as_of, phase=phase)
+            missing = QualityDecision(
+                instrument_id="513310.SH",
+                level=QualityLevel.BLOCKED,
+                reasons=("no_valid_quotes",),
+                canonical_quote=None,
+                source_quotes=(),
+            )
+            return WorkflowInputs(
+                system_errors=inputs.system_errors,
+                quality=(*inputs.quality, missing),
+                etf_contexts=inputs.etf_contexts,
+                stock_contexts=inputs.stock_contexts,
+                raw_quotes=inputs.raw_quotes,
+            )
+
+    dependencies["gateway"] = PartialFailureGateway()
+    workflow = TailDecisionWorkflow(**dependencies)
+
+    result = workflow.run(
+        as_of="2026-08-03T14:30:00+08:00",
+        phase="final",
+    )
+
+    assert result.status is DecisionStatus.RECOMMENDED
+    assert result.allocations

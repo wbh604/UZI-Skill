@@ -96,12 +96,15 @@ class TailDecisionWorkflow:
             )
 
         blocking_reasons = list(inputs.system_errors)
-        blocking_reasons.extend(
-            reason
-            for item in inputs.quality
-            if item.level is QualityLevel.BLOCKED
-            for reason in (item.reasons or ("quality_blocked",))
+        all_instruments_blocked = bool(inputs.quality) and all(
+            item.level is QualityLevel.BLOCKED for item in inputs.quality
         )
+        if all_instruments_blocked:
+            blocking_reasons.extend(
+                reason
+                for item in inputs.quality
+                for reason in (item.reasons or ("quality_blocked",))
+            )
         if blocking_reasons:
             return self._finish(
                 _decision_run(

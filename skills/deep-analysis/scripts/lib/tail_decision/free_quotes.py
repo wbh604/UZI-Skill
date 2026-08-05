@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import re
+import time
 from typing import Iterable, Protocol, Sequence
 
 import requests
@@ -57,12 +58,20 @@ class EastmoneyQuoteProvider:
         session: requests.Session | None = None,
         timeout: float = 8.0,
         max_workers: int = 8,
+        max_attempts: int = 2,
+        retry_backoff_seconds: float = 0.2,
     ):
         if max_workers <= 0 or max_workers > 8:
             raise ValueError("max_workers must be between 1 and 8")
+        if max_attempts <= 0:
+            raise ValueError("max_attempts must be positive")
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be non-negative")
         self.session = session or requests.Session()
         self.timeout = timeout
         self.max_workers = max_workers
+        self.max_attempts = max_attempts
+        self.retry_backoff_seconds = retry_backoff_seconds
 
     @staticmethod
     def parse_payload(
@@ -119,14 +128,25 @@ class EastmoneyQuoteProvider:
         return quotes
 
     def _fetch_one(self, instrument_id: str, now: datetime) -> QuoteSnapshot:
-        response = self.session.get(
-            self.endpoint,
-            params={"secid": _eastmoney_secid(instrument_id), "fields": self.fields},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        return self.parse_payload(instrument_id, response.json(), now)
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                response = self.session.get(
+                    self.endpoint,
+                    params={
+                        "secid": _eastmoney_secid(instrument_id),
+                        "fields": self.fields,
+                    },
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return self.parse_payload(instrument_id, response.json(), now)
+            except requests.RequestException:
+                if attempt >= self.max_attempts:
+                    raise
+                if self.retry_backoff_seconds:
+                    time.sleep(self.retry_backoff_seconds * attempt)
+        raise RuntimeError("unreachable eastmoney retry state")
 
 
 class TencentQuoteProvider:
@@ -144,27 +164,30 @@ class TencentQuoteProvider:
             parts = payload.split("~")
             if len(parts) < 38:
                 continue
-            exchange = "SH" if symbol.startswith("sh") else "SZ"
-            instrument_id = f"{symbol[2:]}.{exchange}"
-            timestamp = fetched_at
-            if parts[30]:
-                timestamp = datetime.strptime(parts[30], "%Y%m%d%H%M%S").replace(
-                    tzinfo=fetched_at.tzinfo
+            try:
+                exchange = "SH" if symbol.startswith("sh") else "SZ"
+                instrument_id = f"{symbol[2:]}.{exchange}"
+                timestamp = fetched_at
+                if parts[30]:
+                    timestamp = datetime.strptime(parts[30], "%Y%m%d%H%M%S").replace(
+                        tzinfo=fetched_at.tzinfo
+                    )
+                quotes[instrument_id] = QuoteSnapshot(
+                    instrument_id=instrument_id,
+                    instrument_type=_instrument_type(instrument_id),
+                    timestamp=timestamp,
+                    last_price=float(parts[3]),
+                    open=float(parts[5]),
+                    high=float(parts[33]),
+                    low=float(parts[34]),
+                    pre_close=float(parts[4]),
+                    volume=float(parts[6] or 0) * 100.0,
+                    amount=float(parts[37] or 0) * 10_000.0,
+                    source="tencent",
+                    fetched_at=fetched_at,
                 )
-            quotes[instrument_id] = QuoteSnapshot(
-                instrument_id=instrument_id,
-                instrument_type=_instrument_type(instrument_id),
-                timestamp=timestamp,
-                last_price=float(parts[3]),
-                open=float(parts[5]),
-                high=float(parts[33]),
-                low=float(parts[34]),
-                pre_close=float(parts[4]),
-                volume=float(parts[6] or 0) * 100.0,
-                amount=float(parts[37] or 0) * 10_000.0,
-                source="tencent",
-                fetched_at=fetched_at,
-            )
+            except (IndexError, TypeError, ValueError):
+                continue
         return quotes
 
     def fetch_quotes(
