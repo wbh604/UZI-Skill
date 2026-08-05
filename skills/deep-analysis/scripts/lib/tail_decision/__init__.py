@@ -13,6 +13,12 @@ from .contracts import (
     QuoteSnapshot,
 )
 from .recorder import DecisionRecorder
+from .research_evidence import (
+    ResearchEvidence,
+    load_ai_discovery,
+    load_uzi_evidence,
+    merge_research_evidence,
+)
 from .universe import (
     Universe,
     UniverseDataError,
@@ -33,9 +39,13 @@ __all__ = [
     "QualityDecision",
     "QualityLevel",
     "QuoteSnapshot",
+    "ResearchEvidence",
     "TailDecisionWorkflow",
     "Universe",
     "UniverseDataError",
     "build_liquid_universe",
     "load_universe_override",
+    "load_ai_discovery",
+    "load_uzi_evidence",
+    "merge_research_evidence",
 ]
