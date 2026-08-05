@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from math import isfinite
 from typing import Iterable
 
@@ -46,6 +47,8 @@ def _eligibility_failures(
         return failures
     if context.intraday.get("production_ready") is not True:
         failures.append("intraday_not_ready")
+    if _uzi_state(context) == "blocked":
+        failures.append("uzi_review_blocked")
 
     upper_name = context.name.upper()
     if (
@@ -145,7 +148,12 @@ def _candidate(context: InstrumentContext, config: DecisionConfig) -> Candidate:
         score=round(score, 6),
         max_buy_price=max_buy_price,
         lot_size=lot_size,
-        reasons=("quality_pass", "tradability_pass", "overnight_strength_ranked"),
+        reasons=(
+            "quality_pass",
+            "tradability_pass",
+            "overnight_strength_ranked",
+            *_research_audit_reasons(context),
+        ),
         rejections=(),
         exit_plan={
             "exit_session": "next_trading_day",
@@ -173,6 +181,50 @@ def _number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if isfinite(number) else None
+
+
+def _uzi_state(context: InstrumentContext) -> str | None:
+    evidence = context.metadata.get("research_evidence")
+    if not isinstance(evidence, Mapping):
+        return None
+    state = evidence.get("uzi_state")
+    return state if state in ("approved", "blocked") else None
+
+
+def _research_audit_reasons(context: InstrumentContext) -> tuple[str, ...]:
+    evidence = context.metadata.get("research_evidence")
+    if not isinstance(evidence, Mapping):
+        return ("uzi_unavailable",)
+
+    reasons: list[str] = []
+    ai_score = _bounded_number(evidence.get("ai_score"), 0.0, 100.0)
+    if ai_score is not None:
+        reasons.append(f"ai_discovery_score:{ai_score:.1f}")
+    uzi_score = _bounded_number(evidence.get("uzi_score"), 0.0, 100.0)
+    coverage = _bounded_number(evidence.get("uzi_coverage"), 0.0, 1.0)
+    if uzi_score is not None:
+        reasons.append(f"uzi_score:{uzi_score:.1f}")
+    if coverage is not None:
+        reasons.append(f"uzi_coverage:{coverage:.2f}")
+    if _uzi_state(context) is None or uzi_score is None or coverage is None:
+        reasons.append("uzi_unavailable")
+    reasons.extend(f"evidence_date:{value}" for value in _audit_strings(evidence.get("source_dates")))
+    reasons.extend(f"evidence_reason:{value}" for value in _audit_strings(evidence.get("reasons")))
+    return tuple(reasons)
+
+
+def _bounded_number(value: object, minimum: float, maximum: float) -> float | None:
+    number = _number(value)
+    return number if number is not None and minimum <= number <= maximum else None
+
+
+def _audit_strings(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (tuple, list)):
+        return ()
+    return tuple(
+        item for item in value
+        if isinstance(item, str) and item.strip()
+    )
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
