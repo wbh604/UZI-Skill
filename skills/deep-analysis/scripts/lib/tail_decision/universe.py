@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import json
+import math
 from pathlib import Path
 import re
 import pandas as pd
@@ -64,7 +65,7 @@ def build_liquid_universe(
     if min_history_sessions <= 0:
         raise ValueError("min_history_sessions must be positive")
 
-    stock_as_of = _latest_trade_date(stock_daily)
+    stock_as_of = _latest_valid_stock_trade_date(stock_daily)
     stock_ids = _eligible_stock_ids(stock_basic, stock_as_of, min_stock_listing_days)
     etf_ids = _eligible_etf_ids(etf_basic)
     stocks, stock_reasons = _rank_stocks(
@@ -166,16 +167,7 @@ def _rank_stocks(
     required = {"ts_code", "trade_date", "close", "amount"}
     if frame.empty or not required.issubset(frame.columns) or not eligible:
         return (), ()
-    recent = frame.loc[:, ["ts_code", "trade_date", "close", "amount"]].copy()
-    recent["ts_code"] = recent["ts_code"].astype(str).str.upper()
-    recent = recent[recent["ts_code"].isin(eligible)]
-    recent["trade_date"] = pd.to_datetime(
-        recent["trade_date"].astype(str), format="%Y%m%d", errors="coerce"
-    )
-    recent["close"] = pd.to_numeric(recent["close"], errors="coerce")
-    recent["amount_cny"] = pd.to_numeric(recent["amount"], errors="coerce") * 1000.0
-    recent = recent.dropna(subset=["trade_date", "close", "amount_cny"])
-    recent = recent[(recent["close"] > 0.0) & (recent["amount_cny"] >= 0.0)]
+    recent = _valid_stock_rows(frame, eligible=eligible)
     if recent.empty:
         return (), ()
     latest_sessions = recent.groupby("ts_code", sort=True)["trade_date"].max()
@@ -208,6 +200,32 @@ def _rank_stocks(
         ["average_cny", "ts_code"], ascending=[False, True], kind="stable"
     )
     return tuple(ranked.head(limit)["ts_code"].tolist()), stale_reasons
+
+
+def _latest_valid_stock_trade_date(frame: pd.DataFrame) -> date | None:
+    valid_rows = _valid_stock_rows(frame)
+    return valid_rows["trade_date"].max().date() if not valid_rows.empty else None
+
+
+def _valid_stock_rows(
+    frame: pd.DataFrame, *, eligible: set[str] | None = None
+) -> pd.DataFrame:
+    required = {"ts_code", "trade_date", "close", "amount"}
+    if frame.empty or not required.issubset(frame.columns):
+        return pd.DataFrame(columns=["ts_code", "trade_date", "close", "amount_cny"])
+    rows = frame.loc[:, ["ts_code", "trade_date", "close", "amount"]].copy()
+    rows["ts_code"] = rows["ts_code"].astype(str).str.upper()
+    rows = rows[rows["ts_code"].map(lambda value: bool(_INSTRUMENT_ID.fullmatch(value)))]
+    if eligible is not None:
+        rows = rows[rows["ts_code"].isin(eligible)]
+    rows["trade_date"] = pd.to_datetime(
+        rows["trade_date"].astype(str), format="%Y%m%d", errors="coerce"
+    )
+    rows["close"] = pd.to_numeric(rows["close"], errors="coerce")
+    rows["amount_cny"] = pd.to_numeric(rows["amount"], errors="coerce") * 1000.0
+    rows = rows.dropna(subset=["trade_date", "close", "amount_cny"])
+    finite = rows["close"].map(math.isfinite) & rows["amount_cny"].map(math.isfinite)
+    return rows[finite & (rows["close"] > 0.0) & (rows["amount_cny"] > 0.0)]
 
 
 def _eligible_stock_ids(

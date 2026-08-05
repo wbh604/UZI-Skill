@@ -210,6 +210,37 @@ def test_stale_stock_is_excluded_against_latest_stock_archive_session():
     assert "stale_stock:600002.SH" in universe.reasons
 
 
+def test_malformed_newer_rows_cannot_establish_stock_archive_as_of():
+    daily, stock_basic = one_stock_fixture(
+        code="600001.SH", close=10.0, sessions=20
+    )
+    stock_basic = pd.concat([
+        stock_basic,
+        pd.DataFrame([{
+            "ts_code": "600002.SH", "name": "Name 2", "list_date": "20100101"
+        }]),
+    ], ignore_index=True)
+    daily = pd.concat([
+        daily,
+        pd.DataFrame([
+            {"ts_code": "600002.SH", "trade_date": "20260803", "close": None, "amount": 500_000},
+            {"ts_code": "600002.SH", "trade_date": "20260804", "close": 10.0, "amount": float("inf")},
+            {"ts_code": "600002.SH", "trade_date": "20260805", "close": 10.0, "amount": 0.0},
+            {"ts_code": "600002.SH", "trade_date": "not-a-date", "close": 10.0, "amount": 500_000},
+        ]),
+    ], ignore_index=True)
+
+    universe = build_liquid_universe(
+        daily,
+        empty_fund_daily(),
+        stock_basic,
+        empty_etf_basic(),
+    )
+
+    assert universe.stocks == ("600001.SH",)
+    assert not universe.reasons
+
+
 def test_universe_ignores_turnover_older_than_twenty_sessions():
     rows = [
         {"ts_code": "600001.SH", "trade_date": "20260601", "close": 10.0, "amount": 10_000_000}
