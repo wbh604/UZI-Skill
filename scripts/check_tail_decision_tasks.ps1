@@ -7,14 +7,21 @@ $ErrorActionPreference = "Stop"
 
 $ScriptRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $ProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptRoot))
-$ExpectedRoot = [System.IO.Path]::GetFullPath("D:\work\gupiao\UZI-Skill")
-if (-not $ProjectRoot.Equals($ExpectedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Project root must resolve to $ExpectedRoot; got $ProjectRoot"
+$ProjectPrefix = $ProjectRoot + [System.IO.Path]::DirectorySeparatorChar
+$GitMarker = Join-Path $ProjectRoot ".git"
+if (-not (Test-Path -LiteralPath $GitMarker)) {
+    throw "Project root is not a Git checkout: $ProjectRoot"
 }
 
 $CliPath = [System.IO.Path]::GetFullPath(
     (Join-Path $ProjectRoot "skills\deep-analysis\scripts\run_tail_decision.py")
 )
+if (-not $CliPath.StartsWith($ProjectPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "CLI path escaped the project root: $CliPath"
+}
+if (-not (Test-Path -LiteralPath $CliPath -PathType Leaf)) {
+    throw "Tail-decision CLI does not exist: $CliPath"
+}
 $StateRoot = [System.IO.Path]::GetFullPath("D:\work\gupiao\data\tail_decision_runtime")
 $LogRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $ProjectRoot "reports\tail_decision\scheduler")
@@ -31,7 +38,7 @@ $TaskSpecs = @(
 
 if ($WhatIf) {
     foreach ($Spec in $TaskSpecs) {
-        Write-Output "CHECKSPEC $($Spec.Name) $($Spec.Time) --phase $($Spec.Phase)"
+        Write-Output "CHECKSPEC $($Spec.Name) $($Spec.Time) --phase $($Spec.Phase) --position-cap 12000 --available-cash 12000"
     }
     exit 0
 }
@@ -54,6 +61,12 @@ foreach ($Spec in $TaskSpecs) {
     }
     if (-not $Arguments.Contains("--state-root") -or -not $Arguments.Contains($StateRoot)) {
         $Failures.Add("wrong_state_root:$($Spec.Name)")
+    }
+    if (-not $Arguments.Contains("--position-cap 12000")) {
+        $Failures.Add("wrong_position_cap:$($Spec.Name)")
+    }
+    if (-not $Arguments.Contains("--available-cash 12000")) {
+        $Failures.Add("wrong_available_cash:$($Spec.Name)")
     }
     $Trigger = @($Task.Triggers)[0]
     $ActualTime = ([datetime]$Trigger.StartBoundary).ToString("HH:mm")

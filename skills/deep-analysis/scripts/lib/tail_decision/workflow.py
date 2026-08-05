@@ -236,7 +236,13 @@ class TailDecisionWorkflow:
         raw_quotes: Mapping[str, Any],
     ) -> DecisionRun:
         if self.recorder is not None:
-            self.recorder.record(run, raw_quotes)
+            audit_quotes = dict(raw_quotes)
+            audit_quotes["cash_audit"] = {
+                "configured_position_cap_cny": self.config.configured_position_cap_cny,
+                "available_cash_cny": self.config.available_cash_cny,
+                "effective_position_cap_cny": self.config.effective_position_cap_cny,
+            }
+            self.recorder.record(run, audit_quotes)
         return run
 
 

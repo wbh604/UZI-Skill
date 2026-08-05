@@ -27,6 +27,8 @@ def test_scheduler_whatif_lists_all_local_cli_phases_without_credentials():
     assert any("09:25" in line and "--phase exit_open" in line for line in lines)
     assert "run_tail_decision.py" in completed.stdout
     assert "--state-root" in completed.stdout
+    assert "--position-cap 12000" in completed.stdout
+    assert "--available-cash 12000" in completed.stdout
     assert "TUSHARE_TOKEN" not in completed.stdout
 
 
@@ -54,6 +56,8 @@ def test_scheduler_health_whatif_lists_the_same_seven_tasks():
     assert len(lines) == 7
     assert any("UZI-Tail-Final" in line and "14:30" in line for line in lines)
     assert any("UZI-Tail-ExitCheck" in line and "09:35" in line for line in lines)
+    assert "--position-cap 12000" in completed.stdout
+    assert "--available-cash 12000" in completed.stdout
 
 
 def test_scheduler_health_allows_windows_task_has_not_run_status():

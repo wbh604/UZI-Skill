@@ -4,7 +4,7 @@
 
 本系统提供本地决策支持、模拟记录和人工执行清单，不连接券商，不提交、撤销或修改任何真实订单。Tushare Token、周卡和高积分权限均不是日常运行依赖；Tushare 仅可作为以后明确启用的可选增强。
 
-默认账户资产为 10,000 元，最大组合敞口为 8,000 元，单标的上限为 4,000 元。ETF 与个股共享同一个 8,000 元上限。
+默认账户资产、配置仓位上限和可用现金均为 12,000 元。有效仓位上限取配置仓位上限与本地提供的可用现金中的较小值；ETF 与个股共享该账户级上限，最终正式分配最多一项。
 
 ## 日常命令
 
@@ -18,6 +18,14 @@ python skills/deep-analysis/scripts/run_tail_decision.py --phase close
 python skills/deep-analysis/scripts/run_tail_decision.py --phase exit_open
 python skills/deep-analysis/scripts/run_tail_decision.py --phase exit_check
 ```
+
+需要明确记录现金边界时，在每个阶段显式传入：
+
+```powershell
+python skills/deep-analysis/scripts/run_tail_decision.py --phase final --position-cap 12000 --available-cash 12000
+```
+
+AI 候选和 UZI 缓存只作为只读研究证据。UZI `synthesis.json` 的修改时间晚于运行 `--as-of`、过期、损坏或代码不匹配时，均按对应标的的不可用证据处理；未来证据绝不参与评分。JSON 审计会保留漏斗数量、证据日期/忽略原因和三项现金上限，Markdown 仅显示单一 `Buy plan` 或明确的非操作状态。
 
 可用 `--as-of 2026-08-03T14:30:00+08:00` 固定时点，用 `--data-root` 指定历史归档，用 `--output-root` 指定报告根目录。验收或离线演练必须显式添加 `--offline-fixture`；该模式不发网络请求。
 
@@ -51,13 +59,13 @@ python skills/deep-analysis/scripts/run_tail_decision.py --phase exit_check
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_tail_decision_tasks.ps1 -WhatIf
 ```
 
-确认七个任务、Python 路径和时间后再安装或更新：
+确认七个任务、Python 路径和时间后再安装或更新。`-WhatIf` 不会创建或修改 Windows 任务，并可从主检出或其 Git 链接工作树安全运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_tail_decision_tasks.ps1
 ```
 
-脚本按固定任务名使用 `Register-ScheduledTask -Force`，因此重复执行会更新定义，不会生成重复任务。调度日志位于 `reports/tail_decision/scheduler`。
+脚本按固定任务名使用 `Register-ScheduledTask -Force`，因此重复执行会更新定义，不会生成重复任务。所有七个任务保留隐藏窗口、既有阶段和时间，并显式传入 `--position-cap 12000 --available-cash 12000`；调度日志位于 `reports/tail_decision/scheduler`。调度不会读取 token、连接券商或自动下单。
 
 ## `blocked` 恢复流程
 
@@ -74,7 +82,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_tail_decisio
 - 已完成的决策和模拟记录只追加，不覆盖。
 - 正式小额实盘前至少前向模拟 60 个交易日，并至少形成 40 笔可成交模拟订单。
 - 放行门槛：扣除全部成本后净收益为正、Profit Factor 不低于 1.2、最大回撤不超过 8%，且 ETF 与个股分别报告。
-- 2,000、4,000、8,000 元分阶段验证；不得通过降低门槛凑交易数。
+- 以不超过 12,000 元且不超过本地可用现金的单一模拟仓位分阶段验证；不得通过降低门槛凑交易数。
 
 ## 当前安全限制
 

@@ -41,6 +41,10 @@ def test_production_no_token_smoke_never_uses_fixture_or_paid_provider(
             "final",
             "--as-of",
             "2026-08-04T14:30:00+08:00",
+            "--position-cap",
+            "12000",
+            "--available-cash",
+            "12000",
             "--data-root",
             str(tmp_path / "archive"),
             "--output-root",
@@ -54,5 +58,11 @@ def test_production_no_token_smoke_never_uses_fixture_or_paid_provider(
     assert exit_code == 0
     assert payload["status"] == "recommended"
     assert payload["total_exposure"] <= 12_000.0
+    assert len(payload["allocations"]) <= 1
+    assert payload["effective_position_cap_cny"] == 12_000.0
+    assert "TUSHARE_TOKEN" not in json.dumps(payload)
     assert payload["ledger_events"] == 1
-    assert list((tmp_path / "reports" / "tail_decision").rglob("*.json"))
+    artifacts = list((tmp_path / "reports" / "tail_decision").rglob("*.json"))
+    assert artifacts
+    artifact = json.loads(artifacts[0].read_text(encoding="utf-8"))
+    assert artifact["audit"]["cash"]["effective_position_cap_cny"] == 12_000.0

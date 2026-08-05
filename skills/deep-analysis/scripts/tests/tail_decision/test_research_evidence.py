@@ -43,13 +43,20 @@ def write_uzi_cache(
     blocked: bool,
 ) -> None:
     root.mkdir(parents=True)
-    (root / "synthesis.json").write_text(json.dumps({
+    source = root / "synthesis.json"
+    source.write_text(json.dumps({
         "ticker": root.name,
         "overall_score": overall_score,
         "data_coverage": data_coverage,
         "panel_consensus": panel_consensus,
         "uzi_decision_state": "blocked" if blocked else "approved",
     }), encoding="utf-8")
+    set_uzi_cache_mtime(source)
+
+
+def set_uzi_cache_mtime(source: Path) -> None:
+    fixed_mtime = aware_at(2026, 8, 5).timestamp()
+    os.utime(source, (fixed_mtime, fixed_mtime))
 
 
 def test_ai_discovery_reads_candidates_and_review_queue_without_making_orders(tmp_path):
@@ -125,7 +132,9 @@ def test_uzi_cache_uses_score_coverage_and_explicit_block(tmp_path):
 def test_malformed_uzi_json_is_recorded_as_unavailable(tmp_path):
     cache = tmp_path / "300170.SZ"
     cache.mkdir()
-    (cache / "synthesis.json").write_text("not-json", encoding="utf-8")
+    source = cache / "synthesis.json"
+    source.write_text("not-json", encoding="utf-8")
+    set_uzi_cache_mtime(source)
     evidence = load_uzi_evidence(
         tmp_path, ["300170.SZ"], aware_at(2026, 8, 5)
     )
@@ -161,6 +170,7 @@ def test_uzi_unknown_decision_state_removes_positive_evidence(tmp_path):
     payload = json.loads(source.read_text(encoding="utf-8"))
     payload["uzi_decision_state"] = "nonsense"
     source.write_text(json.dumps(payload), encoding="utf-8")
+    set_uzi_cache_mtime(source)
 
     evidence = load_uzi_evidence(
         tmp_path, ["300759.SZ"], aware_at(2026, 8, 5)
@@ -182,6 +192,7 @@ def test_uzi_malformed_decision_state_degrades_without_an_exception(tmp_path):
     payload = json.loads(source.read_text(encoding="utf-8"))
     payload["uzi_decision_state"] = ["approved"]
     source.write_text(json.dumps(payload), encoding="utf-8")
+    set_uzi_cache_mtime(source)
 
     evidence = load_uzi_evidence(
         tmp_path, ["300759.SZ"], aware_at(2026, 8, 5)
@@ -221,6 +232,7 @@ def test_uzi_ticker_directory_mismatch_removes_positive_evidence(tmp_path):
     payload = json.loads(source.read_text(encoding="utf-8"))
     payload["ticker"] = "600489.SH"
     source.write_text(json.dumps(payload), encoding="utf-8")
+    set_uzi_cache_mtime(source)
 
     evidence = load_uzi_evidence(
         tmp_path, ["300759.SZ"], aware_at(2026, 8, 5)

@@ -8,15 +8,16 @@ $ErrorActionPreference = "Stop"
 
 $ScriptRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $ProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptRoot))
-$ExpectedRoot = [System.IO.Path]::GetFullPath("D:\work\gupiao\UZI-Skill")
-if (-not $ProjectRoot.Equals($ExpectedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Project root must resolve to $ExpectedRoot; got $ProjectRoot"
+$ProjectPrefix = $ProjectRoot + [System.IO.Path]::DirectorySeparatorChar
+$GitMarker = Join-Path $ProjectRoot ".git"
+if (-not (Test-Path -LiteralPath $GitMarker)) {
+    throw "Project root is not a Git checkout: $ProjectRoot"
 }
 
 $CliPath = [System.IO.Path]::GetFullPath(
     (Join-Path $ProjectRoot "skills\deep-analysis\scripts\run_tail_decision.py")
 )
-if (-not $CliPath.StartsWith($ProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+if (-not $CliPath.StartsWith($ProjectPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "CLI path escaped the project root: $CliPath"
 }
 if (-not (Test-Path -LiteralPath $CliPath -PathType Leaf)) {
@@ -36,7 +37,7 @@ $StateRoot = [System.IO.Path]::GetFullPath("D:\work\gupiao\data\tail_decision_ru
 $LogRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $ProjectRoot "reports\tail_decision\scheduler")
 )
-if (-not $LogRoot.StartsWith($ProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+if (-not $LogRoot.StartsWith($ProjectPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Scheduler log path escaped the project root: $LogRoot"
 }
 if (-not $WhatIf) {
@@ -72,14 +73,15 @@ foreach ($Spec in $TaskSpecs) {
     $QuotedLog = ConvertTo-PowerShellLiteral $LogPath
     $CliArguments = (
         "$QuotedCli --phase $($Spec.Phase) --data-root $QuotedDataRoot " +
-        "--output-root $QuotedOutputRoot --state-root $QuotedStateRoot"
+        "--output-root $QuotedOutputRoot --state-root $QuotedStateRoot " +
+        "--position-cap 12000 --available-cash 12000"
     )
     $Invocation = "& $QuotedPython $CliArguments *>> $QuotedLog; exit `$LASTEXITCODE"
 
     if ($WhatIf) {
         Write-Output (
             "WHATIF $($Spec.Name) $($Spec.Time) $CliPath --phase $($Spec.Phase) " +
-            "--state-root $StateRoot"
+            "--state-root $StateRoot --position-cap 12000 --available-cash 12000"
         )
         continue
     }
