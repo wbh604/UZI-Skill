@@ -179,6 +179,37 @@ def test_stock_is_excluded_when_one_lot_exceeds_cap():
     assert universe.stocks == ()
 
 
+def test_stale_stock_is_excluded_against_latest_stock_archive_session():
+    rows = [
+        {
+            "ts_code": code,
+            "trade_date": trade_date.strftime("%Y%m%d"),
+            "close": 10.0,
+            "amount": 500_000.0,
+        }
+        for code, dates in (
+            ("600001.SH", pd.date_range("2026-08-03", periods=20, freq="B")),
+            ("600002.SH", pd.date_range("2026-06-01", periods=20, freq="B")),
+        )
+        for trade_date in dates
+    ]
+    stock_basic = pd.DataFrame([
+        {"ts_code": "600001.SH", "name": "Name 1", "list_date": "20100101"},
+        {"ts_code": "600002.SH", "name": "Name 2", "list_date": "20100101"},
+    ])
+
+    universe = build_liquid_universe(
+        pd.DataFrame(rows),
+        empty_fund_daily(),
+        stock_basic,
+        empty_etf_basic(),
+        max_stocks=2,
+    )
+
+    assert universe.stocks == ("600001.SH",)
+    assert "stale_stock:600002.SH" in universe.reasons
+
+
 def test_universe_ignores_turnover_older_than_twenty_sessions():
     rows = [
         {"ts_code": "600001.SH", "trade_date": "20260601", "close": 10.0, "amount": 10_000_000}

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
+import math
 from types import MappingProxyType
 from typing import Mapping
 
@@ -42,13 +44,18 @@ def build_candidate_funnel(
     fund_daily: pd.DataFrame,
     evidence: Mapping[str, ResearchEvidence],
     *,
+    as_of: date | datetime,
     max_stocks: int = 30,
     max_etfs: int = 10,
+    research_stock_target: int = 300,
 ) -> CandidateFunnel:
     """Keep all qualified research names and deterministically narrow observation."""
 
     if max_stocks <= 0 or max_etfs <= 0:
         raise ValueError("observation limits must be positive")
+    if research_stock_target <= 0:
+        raise ValueError("research_stock_target must be positive")
+    as_of_date = _as_of_date(as_of)
     normalized_evidence = {
         instrument_id: item
         for instrument_id, item in evidence.items()
@@ -59,7 +66,12 @@ def build_candidate_funnel(
         for instrument_id, item in normalized_evidence.items()
         if item.uzi_state == "blocked"
     }
-    reasons = tuple(f"uzi_blocked:{instrument_id}" for instrument_id in sorted(blocked))
+    reasons = list(universe.reasons)
+    if len(universe.stocks) < research_stock_target:
+        reasons.append(
+            f"research_stock_target_unmet:{len(universe.stocks)}/{research_stock_target}"
+        )
+    reasons.extend(f"uzi_blocked:{instrument_id}" for instrument_id in sorted(blocked))
     observation = Universe(
         stocks=_narrow(
             universe.stocks,
@@ -67,6 +79,7 @@ def build_candidate_funnel(
             normalized_evidence,
             blocked,
             max_stocks,
+            as_of_date,
         ),
         etfs=_narrow(
             universe.etfs,
@@ -74,6 +87,7 @@ def build_candidate_funnel(
             normalized_evidence,
             blocked,
             max_etfs,
+            as_of_date,
         ),
     )
     return CandidateFunnel(
@@ -86,7 +100,7 @@ def build_candidate_funnel(
             observation_stocks=len(observation.stocks),
             research_etfs=len(universe.etfs),
             observation_etfs=len(observation.etfs),
-            reasons=reasons,
+            reasons=tuple(reasons),
         ),
     )
 
@@ -97,8 +111,9 @@ def _narrow(
     evidence: Mapping[str, ResearchEvidence],
     blocked: set[str],
     limit: int,
+    as_of: date,
 ) -> tuple[str, ...]:
-    metrics = _local_metrics(daily, instrument_ids)
+    metrics = _local_metrics(daily, instrument_ids, as_of)
     scored = [
         (
             _local_score(metrics.get(instrument_id, {}))
@@ -112,7 +127,9 @@ def _narrow(
     return tuple(instrument_id for _, instrument_id in scored[:limit])
 
 
-def _local_metrics(daily: pd.DataFrame, instrument_ids: tuple[str, ...]) -> dict[str, dict[str, float]]:
+def _local_metrics(
+    daily: pd.DataFrame, instrument_ids: tuple[str, ...], as_of: date
+) -> dict[str, dict[str, float]]:
     required = {"ts_code", "trade_date", "close", "amount"}
     if daily.empty or not required.issubset(daily.columns) or not instrument_ids:
         return {}
@@ -125,6 +142,7 @@ def _local_metrics(daily: pd.DataFrame, instrument_ids: tuple[str, ...]) -> dict
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
     frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce")
     frame = frame.dropna(subset=["trade_date", "close", "amount"])
+    frame = frame[frame["trade_date"] <= pd.Timestamp(as_of)]
     frame = frame[(frame["close"] > 0.0) & (frame["amount"] >= 0.0)]
     if frame.empty:
         return {}
@@ -163,17 +181,40 @@ def _local_metrics(daily: pd.DataFrame, instrument_ids: tuple[str, ...]) -> dict
 
 
 def _local_score(metrics: Mapping[str, float]) -> float:
+    values = {key: _finite_non_negative(value) for key, value in metrics.items()}
     return (
-        0.45 * metrics.get("liquidity", 0.0)
-        + 0.25 * metrics.get("completeness", 0.0)
-        + 0.20 * metrics.get("return", 0.0)
-        - 0.10 * metrics.get("volatility", 0.0)
+        0.45 * values.get("liquidity", 0.0)
+        + 0.25 * values.get("completeness", 0.0)
+        + 0.20 * values.get("return", 0.0)
+        - 0.10 * values.get("volatility", 0.0)
     )
 
 
 def _evidence_bonus(evidence: ResearchEvidence | None) -> float:
     if evidence is None:
         return 0.0
-    ai_bonus = min(max(evidence.ai_score or 0.0, 0.0) / 100.0 * 0.05, 0.05)
-    uzi_bonus = min(max(evidence.uzi_score or 0.0, 0.0) / 100.0 * 0.05, 0.05)
+    ai_bonus = _priority_bonus(evidence.ai_score)
+    uzi_bonus = _priority_bonus(evidence.uzi_score) if evidence.uzi_state == "approved" else 0.0
     return ai_bonus + uzi_bonus
+
+
+def _as_of_date(value: date | datetime) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raise TypeError("as_of must be a date or datetime")
+
+
+def _priority_bonus(value: object) -> float:
+    return min(_finite_non_negative(value) / 100.0 * 0.05, 0.05)
+
+
+def _finite_non_negative(value: object) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return result if math.isfinite(result) and result >= 0.0 else 0.0

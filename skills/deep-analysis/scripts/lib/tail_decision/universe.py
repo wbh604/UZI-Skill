@@ -21,10 +21,12 @@ class UniverseDataError(RuntimeError):
 class Universe:
     etfs: tuple[str, ...]
     stocks: tuple[str, ...]
+    reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "etfs", tuple(self.etfs))
         object.__setattr__(self, "stocks", tuple(self.stocks))
+        object.__setattr__(self, "reasons", tuple(self.reasons))
         for instrument_id in (*self.etfs, *self.stocks):
             if not _INSTRUMENT_ID.fullmatch(instrument_id):
                 raise UniverseDataError(
@@ -62,10 +64,10 @@ def build_liquid_universe(
     if min_history_sessions <= 0:
         raise ValueError("min_history_sessions must be positive")
 
-    as_of = _latest_trade_date(stock_daily, fund_daily)
-    stock_ids = _eligible_stock_ids(stock_basic, as_of, min_stock_listing_days)
+    stock_as_of = _latest_trade_date(stock_daily)
+    stock_ids = _eligible_stock_ids(stock_basic, stock_as_of, min_stock_listing_days)
     etf_ids = _eligible_etf_ids(etf_basic)
-    stocks = _rank_stocks(
+    stocks, stock_reasons = _rank_stocks(
         stock_daily,
         eligible=stock_ids,
         limit=max_stocks,
@@ -73,6 +75,7 @@ def build_liquid_universe(
         lot_notional_cap_cny=max_stock_lot_notional_cny,
         lot_size=stock_lot_size,
         min_history_sessions=min_history_sessions,
+        archive_as_of=stock_as_of,
     )
     etfs = _rank_amount(
         fund_daily,
@@ -81,7 +84,7 @@ def build_liquid_universe(
         minimum_cny=min_etf_amount_cny,
         min_history_sessions=min_history_sessions,
     )
-    return Universe(etfs=etfs, stocks=stocks)
+    return Universe(etfs=etfs, stocks=stocks, reasons=stock_reasons)
 
 
 def load_universe_override(path: str | Path) -> Universe | None:
@@ -158,10 +161,11 @@ def _rank_stocks(
     lot_notional_cap_cny: float,
     lot_size: int,
     min_history_sessions: int,
-) -> tuple[str, ...]:
+    archive_as_of: date | None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     required = {"ts_code", "trade_date", "close", "amount"}
     if frame.empty or not required.issubset(frame.columns) or not eligible:
-        return ()
+        return (), ()
     recent = frame.loc[:, ["ts_code", "trade_date", "close", "amount"]].copy()
     recent["ts_code"] = recent["ts_code"].astype(str).str.upper()
     recent = recent[recent["ts_code"].isin(eligible)]
@@ -173,7 +177,18 @@ def _rank_stocks(
     recent = recent.dropna(subset=["trade_date", "close", "amount_cny"])
     recent = recent[(recent["close"] > 0.0) & (recent["amount_cny"] >= 0.0)]
     if recent.empty:
-        return ()
+        return (), ()
+    latest_sessions = recent.groupby("ts_code", sort=True)["trade_date"].max()
+    fresh_ids = set(
+        latest_sessions[latest_sessions.eq(pd.Timestamp(archive_as_of))].index
+    ) if archive_as_of is not None else set()
+    stale_reasons = tuple(
+        f"stale_stock:{instrument_id}"
+        for instrument_id in sorted(set(latest_sessions.index) - fresh_ids)
+    )
+    recent = recent[recent["ts_code"].isin(fresh_ids)]
+    if recent.empty:
+        return (), stale_reasons
     newest = (
         recent.sort_values(["ts_code", "trade_date"], kind="stable")
         .groupby("ts_code", sort=True)
@@ -192,7 +207,7 @@ def _rank_stocks(
     ranked = ranked.sort_values(
         ["average_cny", "ts_code"], ascending=[False, True], kind="stable"
     )
-    return tuple(ranked.head(limit)["ts_code"].tolist())
+    return tuple(ranked.head(limit)["ts_code"].tolist()), stale_reasons
 
 
 def _eligible_stock_ids(
