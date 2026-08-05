@@ -3,6 +3,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 SCRIPTS = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SCRIPTS))
@@ -132,6 +134,42 @@ def test_cli_rejects_nonpositive_available_cash(capsys):
 
     assert exit_code == 3
     assert json.loads(capsys.readouterr().out)["reasons"] == ["invalid_configuration"]
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    (
+        ("--position-cap", "nan"),
+        ("--available-cash", "inf"),
+        ("--account-assets", "-inf"),
+    ),
+)
+def test_cli_rejects_nonfinite_cash_configuration_without_nonstandard_json(
+    tmp_path, flag, value
+):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "skills/deep-analysis/scripts/run_tail_decision.py",
+            "--phase",
+            "preview",
+            "--offline-fixture",
+            "--output-root",
+            str(tmp_path),
+            f"{flag}={value}",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 3
+    assert json.loads(completed.stdout) == {
+        "status": "blocked",
+        "reasons": ["invalid_configuration"],
+    }
+    assert "NaN" not in completed.stdout
+    assert "Infinity" not in completed.stdout
 
 
 def test_final_cli_advances_the_append_only_paper_ledger(tmp_path):

@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from hashlib import sha256
 import json
+from math import isfinite
+from numbers import Real
 
 from .contracts import InstrumentType
 
@@ -44,12 +46,16 @@ class DecisionConfig:
     sell_slippage_bps: float = 5.0
 
     def __post_init__(self) -> None:
-        if self.account_assets <= 0:
-            raise ValueError("account_assets must be positive")
-        if self.configured_position_cap_cny <= 0:
-            raise ValueError("configured_position_cap_cny must be positive")
-        if self.available_cash_cny is not None and self.available_cash_cny <= 0:
-            raise ValueError("available_cash_cny must be positive")
+        _require_positive_number(self.account_assets, "account_assets")
+        _require_positive_number(
+            self.configured_position_cap_cny,
+            "configured_position_cap_cny",
+        )
+        if self.available_cash_cny is not None:
+            _require_positive_number(
+                self.available_cash_cny,
+                "available_cash_cny",
+            )
 
         for field_name in (
             "research_stock_limit",
@@ -80,13 +86,13 @@ class DecisionConfig:
             "buy_slippage_bps",
             "sell_slippage_bps",
         ):
-            if getattr(self, field_name) < 0:
-                raise ValueError(f"{field_name} must be non-negative")
+            _require_non_negative_number(getattr(self, field_name), field_name)
 
-        if self.min_etf_daily_amount <= 0:
-            raise ValueError("min_etf_daily_amount must be positive")
-        if self.min_stock_daily_amount <= 0:
-            raise ValueError("min_stock_daily_amount must be positive")
+        _require_positive_number(self.min_etf_daily_amount, "min_etf_daily_amount")
+        _require_positive_number(
+            self.min_stock_daily_amount,
+            "min_stock_daily_amount",
+        )
 
         decision_start = _parse_time(self.decision_start, "decision_start")
         final_decision_time = _parse_time(
@@ -124,6 +130,24 @@ def _parse_time(value: str, field_name: str) -> datetime:
         return datetime.strptime(value, "%H:%M")
     except ValueError as exc:
         raise ValueError(f"{field_name} must use HH:MM format") from exc
+
+
+def _require_positive_number(value: object, field_name: str) -> None:
+    if not _is_finite_real(value) or value <= 0:
+        raise ValueError(f"{field_name} must be a finite positive number")
+
+
+def _require_non_negative_number(value: object, field_name: str) -> None:
+    if not _is_finite_real(value) or value < 0:
+        raise ValueError(f"{field_name} must be a finite non-negative number")
+
+
+def _is_finite_real(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, Real)
+        and isfinite(value)
+    )
 
 
 def config_hash(config: DecisionConfig) -> str:

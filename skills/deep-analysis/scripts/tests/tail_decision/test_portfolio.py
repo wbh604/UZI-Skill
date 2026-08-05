@@ -1,6 +1,8 @@
 from pathlib import Path
 import sys
 
+import pytest
+
 
 SCRIPTS = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SCRIPTS))
@@ -86,3 +88,16 @@ def test_allocator_fails_closed_when_available_cash_is_missing():
 
     assert allocations == []
     assert "available_cash_missing" in reasons
+
+
+@pytest.mark.parametrize("lot_size", (100.5, True, 0, -100))
+def test_allocator_skips_non_integer_or_nonpositive_lot_sizes(lot_size):
+    stock = candidate("600406.SH", kind="stock", price=25.0, lot_size=lot_size, score=82)
+
+    allocations, reasons = allocate_portfolio([], [stock], DecisionConfig())
+
+    assert allocations == []
+    assert reasons == [
+        "skipped_invalid_candidate:600406.SH",
+        "no_affordable_candidate",
+    ]

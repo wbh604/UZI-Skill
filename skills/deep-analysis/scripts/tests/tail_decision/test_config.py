@@ -49,6 +49,28 @@ def test_config_rejects_non_positive_cap_or_cash():
         DecisionConfig(available_cash_cny=0.0)
 
 
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "account_assets",
+        "configured_position_cap_cny",
+        "available_cash_cny",
+        "min_etf_daily_amount",
+        "min_stock_daily_amount",
+        "minimum_commission",
+    ),
+)
+@pytest.mark.parametrize(
+    "invalid_value",
+    (float("nan"), float("inf"), float("-inf"), True),
+)
+def test_config_rejects_nonfinite_or_boolean_monetary_values(
+    field_name, invalid_value
+):
+    with pytest.raises(ValueError, match=field_name):
+        DecisionConfig(**{field_name: invalid_value})
+
+
 def test_config_hash_is_deterministic():
     assert config_hash(DecisionConfig()) == config_hash(DecisionConfig())
 

@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from decimal import Decimal, ROUND_FLOOR
 from math import isfinite
+from numbers import Integral, Real
 from typing import Iterable
 
 from .config import DecisionConfig
 from .contracts import Allocation, Candidate
+
+
+def _is_finite_number(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, Real)
+        and isfinite(value)
+    )
 
 
 def allocate_portfolio(
@@ -34,10 +43,12 @@ def allocate_portfolio(
             reasons.append(f"skipped_rejected_candidate:{item.instrument_id}")
             continue
         if (
-            not isfinite(item.max_buy_price)
+            not _is_finite_number(item.max_buy_price)
             or item.max_buy_price <= 0
+            or isinstance(item.lot_size, bool)
+            or not isinstance(item.lot_size, Integral)
             or item.lot_size <= 0
-            or not isfinite(item.score)
+            or not _is_finite_number(item.score)
         ):
             reasons.append(f"skipped_invalid_candidate:{item.instrument_id}")
             continue

@@ -17,3 +17,9 @@
 ## Concerns
 
 - `workflow.py` already implemented the specified final missing-cash block before this task; its regression coverage was expanded, but no production workflow change was needed.
+
+## Review remediation: finite cash inputs and legal lots
+
+- RED: `python -m pytest skills/deep-analysis/scripts/tests/tail_decision/test_config.py skills/deep-analysis/scripts/tests/tail_decision/test_portfolio.py skills/deep-analysis/scripts/tests/tail_decision/test_cli.py -q` produced 23 expected failures. NaN, positive infinity, and `True` passed the comparison-only configuration checks; the allocator created illegal quantities from `100.5` and `True`; and CLI `nan`/`inf` runs completed and could expose non-standard JSON values. A separately-tokenized `-inf` produced an existing argparse error; the regression uses `--flag=-inf` to cover the validated configuration path.
+- GREEN: finite non-boolean real-number guards now protect all cash/exposure and monetary configuration values used by this flow, including account assets, configured and available cash, liquidity amounts, and minimum commission. Existing non-negative rate/threshold validation now also rejects NaN, infinities, and booleans. The allocator requires a positive non-boolean integral candidate lot size before Decimal arithmetic; invalid lots use the stable `skipped_invalid_candidate:<id>` reason.
+- Task 6 plus adjacent regression: `python -m pytest skills/deep-analysis/scripts/tests/tail_decision/test_portfolio.py skills/deep-analysis/scripts/tests/tail_decision/test_workflow.py skills/deep-analysis/scripts/tests/tail_decision/test_cli.py skills/deep-analysis/scripts/tests/tail_decision/test_config.py skills/deep-analysis/scripts/tests/tail_decision/test_no_token_e2e.py -q` passed with 61 tests. `git diff --check` was clean.
