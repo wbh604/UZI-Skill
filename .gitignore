@@ -18,6 +18,7 @@ skills/deep-analysis/.cache/
 # IDE
 .vscode/
 .idea/
+.worktrees/
 *.swp
 *.swo
 
