@@ -12,7 +12,7 @@ from lib.tail_decision import DecisionConfig, DecisionRecorder, TailDecisionWork
 
 
 def test_no_token_end_to_end_records_bounded_portfolio(tmp_path):
-    assert DecisionConfig().max_total_exposure == 8_000.0
+    assert DecisionConfig().effective_position_cap_cny == 12_000.0
     assert DecisionRecorder(tmp_path).root == tmp_path
     assert TailDecisionWorkflow.__name__ == "TailDecisionWorkflow"
 
@@ -38,7 +38,7 @@ def test_no_token_end_to_end_records_bounded_portfolio(tmp_path):
 
     assert completed.returncode == 0, completed.stderr
     summary = json.loads(completed.stdout)
-    assert 0 < summary["total_exposure"] <= 8_000.0
+    assert 0 < summary["total_exposure"] <= 12_000.0
     artifacts = list(tmp_path.rglob("*.json"))
     assert artifacts
     assert all(

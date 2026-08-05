@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime
 from hashlib import sha256
 import json
@@ -10,13 +10,16 @@ import json
 from .contracts import InstrumentType
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class DecisionConfig:
-    account_assets: float = 10_000.0
-    max_total_exposure: float = 8_000.0
-    max_instrument_exposure: float = 4_000.0
+    account_assets: float = 12_000.0
+    configured_position_cap_cny: float = 12_000.0
+    available_cash_cny: float | None = 12_000.0
+    research_stock_limit: int = 300
+    realtime_stock_limit: int = 30
+    realtime_etf_limit: int = 10
     max_etf_candidates: int = 2
-    max_stock_candidates: int = 2
+    max_stock_candidates: int = 3
     min_etf_daily_amount: float = 50_000_000.0
     max_etf_premium_pct: float = 1.0
     etf_nav_stale_minutes: int = 30
@@ -40,17 +43,34 @@ class DecisionConfig:
     buy_slippage_bps: float = 5.0
     sell_slippage_bps: float = 5.0
 
+    def __init__(self, **kwargs: object) -> None:
+        legacy_total = kwargs.pop("max_total_exposure", None)
+        kwargs.pop("max_instrument_exposure", None)
+        if legacy_total is not None and "configured_position_cap_cny" not in kwargs:
+            kwargs["configured_position_cap_cny"] = legacy_total
+
+        valid_fields = {field.name: field for field in fields(type(self))}
+        unknown = set(kwargs) - valid_fields.keys()
+        if unknown:
+            names = ", ".join(sorted(unknown))
+            raise TypeError(f"unexpected configuration field(s): {names}")
+        for name, field in valid_fields.items():
+            value = kwargs.get(name, field.default)
+            object.__setattr__(self, name, value)
+        self.__post_init__()
+
     def __post_init__(self) -> None:
         if self.account_assets <= 0:
             raise ValueError("account_assets must be positive")
-        if not 0 < self.max_total_exposure <= self.account_assets:
-            raise ValueError("max_total_exposure must be positive and not exceed account_assets")
-        if not 0 < self.max_instrument_exposure <= self.max_total_exposure:
-            raise ValueError(
-                "max_instrument_exposure must be positive and not exceed max_total_exposure"
-            )
+        if self.configured_position_cap_cny <= 0:
+            raise ValueError("configured_position_cap_cny must be positive")
+        if self.available_cash_cny is not None and self.available_cash_cny <= 0:
+            raise ValueError("available_cash_cny must be positive")
 
         for field_name in (
+            "research_stock_limit",
+            "realtime_stock_limit",
+            "realtime_etf_limit",
             "max_etf_candidates",
             "max_stock_candidates",
             "etf_nav_stale_minutes",
@@ -92,6 +112,20 @@ class DecisionConfig:
             raise ValueError("final_decision_time must be after decision_start")
         if not self.strategy_version.strip():
             raise ValueError("strategy_version must not be empty")
+
+    @property
+    def effective_position_cap_cny(self) -> float | None:
+        if self.available_cash_cny is None:
+            return None
+        return min(self.configured_position_cap_cny, self.available_cash_cny)
+
+    @property
+    def max_total_exposure(self) -> float | None:
+        return self.effective_position_cap_cny
+
+    @property
+    def max_instrument_exposure(self) -> float | None:
+        return self.effective_position_cap_cny
 
     def lot_size_for(self, instrument_type: InstrumentType) -> int:
         if instrument_type is InstrumentType.STOCK:
