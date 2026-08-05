@@ -10,6 +10,24 @@ sys.path.insert(0, str(SCRIPTS))
 import run_tail_decision as cli
 
 
+def run_offline_cli(tmp_path, *extra_args):
+    command = [
+        sys.executable,
+        "skills/deep-analysis/scripts/run_tail_decision.py",
+        "--phase",
+        "final",
+        "--as-of",
+        "2026-08-05T14:30:00+08:00",
+        "--offline-fixture",
+        "--output-root",
+        str(tmp_path),
+        *extra_args,
+    ]
+    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
 def test_cli_runs_without_tushare_token(tmp_path, monkeypatch):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
     command = [
@@ -60,11 +78,60 @@ def test_cli_accepts_a_separate_forward_state_root(tmp_path):
     assert args.state_root == state_root
 
 
-def test_cli_defaults_to_12000_position_cap():
+def test_cli_defaults_to_user_approved_12000_cash_cap():
     args = cli._parser().parse_args(["--phase", "preview"])
 
-    assert args.account_assets == 12_000.0
-    assert args.max_exposure == 12_000.0
+    assert args.position_cap == 12_000.0
+    assert args.available_cash == 12_000.0
+
+
+def test_cli_payload_exposes_configured_available_and_effective_caps(tmp_path):
+    payload = run_offline_cli(
+        tmp_path,
+        "--position-cap",
+        "12000",
+        "--available-cash",
+        "7600",
+    )
+
+    assert payload["configured_position_cap_cny"] == 12_000.0
+    assert payload["available_cash_cny"] == 7_600.0
+    assert payload["effective_position_cap_cny"] == 7_600.0
+    assert payload["total_exposure"] <= 7_600.0
+    assert len(payload["allocations"]) <= 1
+
+
+def test_legacy_max_exposure_alias_cannot_override_explicit_position_cap(capsys):
+    exit_code = cli.main(
+        [
+            "--phase",
+            "preview",
+            "--position-cap",
+            "12000",
+            "--max-exposure",
+            "4000",
+            "--offline-fixture",
+        ]
+    )
+
+    assert exit_code == 3
+    assert json.loads(capsys.readouterr().out)["reasons"] == ["invalid_configuration"]
+
+
+def test_legacy_max_exposure_alias_maps_to_configured_position_cap(tmp_path):
+    payload = run_offline_cli(tmp_path, "--max-exposure", "7600")
+
+    assert payload["configured_position_cap_cny"] == 7_600.0
+    assert payload["effective_position_cap_cny"] == 7_600.0
+
+
+def test_cli_rejects_nonpositive_available_cash(capsys):
+    exit_code = cli.main(
+        ["--phase", "preview", "--available-cash", "0", "--offline-fixture"]
+    )
+
+    assert exit_code == 3
+    assert json.loads(capsys.readouterr().out)["reasons"] == ["invalid_configuration"]
 
 
 def test_final_cli_advances_the_append_only_paper_ledger(tmp_path):

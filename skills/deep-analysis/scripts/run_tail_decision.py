@@ -178,18 +178,37 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--state-root", type=Path)
     parser.add_argument("--account-assets", type=float, default=12_000.0)
-    parser.add_argument("--max-exposure", type=float, default=12_000.0)
+    parser.add_argument("--position-cap", type=float, default=12_000.0)
+    parser.add_argument("--available-cash", type=float, default=12_000.0)
+    parser.add_argument(
+        "--max-exposure",
+        type=float,
+        default=None,
+        help="deprecated alias for --position-cap",
+    )
     parser.add_argument("--offline-fixture", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = _parser().parse_args(raw_argv)
     try:
+        position_cap_was_explicit = any(
+            value == "--position-cap" or value.startswith("--position-cap=")
+            for value in raw_argv
+        )
+        if args.max_exposure is not None and position_cap_was_explicit:
+            raise ValueError("--max-exposure cannot be combined with --position-cap")
+        configured_position_cap = (
+            args.max_exposure
+            if args.max_exposure is not None
+            else args.position_cap
+        )
         config = DecisionConfig(
             account_assets=args.account_assets,
-            configured_position_cap_cny=args.max_exposure,
-            available_cash_cny=args.account_assets,
+            configured_position_cap_cny=configured_position_cap,
+            available_cash_cny=args.available_cash,
         )
         as_of = (
             datetime.fromisoformat(args.as_of)
@@ -298,6 +317,9 @@ def main(argv: list[str] | None = None) -> int:
         "phase": args.phase,
         "as_of": run.as_of.isoformat(),
         "status": run.status.value,
+        "configured_position_cap_cny": config.configured_position_cap_cny,
+        "available_cash_cny": config.available_cash_cny,
+        "effective_position_cap_cny": config.effective_position_cap_cny,
         "total_exposure": round(sum(item.notional for item in run.allocations), 2),
         "allocations": [
             {

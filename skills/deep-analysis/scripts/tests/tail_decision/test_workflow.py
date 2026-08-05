@@ -35,6 +35,18 @@ def test_single_source_produces_watch_only_without_allocations():
     assert result.allocations == ()
 
 
+def test_preview_research_never_creates_an_allocation():
+    workflow = TailDecisionWorkflow(**workflow_dependencies())
+
+    result = workflow.run(
+        as_of="2026-08-03T14:10:00+08:00",
+        phase="preview",
+    )
+
+    assert result.status is DecisionStatus.WATCH_ONLY
+    assert result.allocations == ()
+
+
 def test_final_phase_allocates_only_after_quality_passes():
     workflow = TailDecisionWorkflow(**workflow_dependencies())
 

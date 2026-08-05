@@ -23,12 +23,11 @@ def allocate_portfolio(
     )
     allocations: list[Allocation] = []
     reasons: list[str] = []
-    if config.available_cash_cny is None:
+    effective_cap = config.effective_position_cap_cny
+    if effective_cap is None:
         return allocations, ["available_cash_missing"]
 
-    total_budget = Decimal(str(min(config.max_total_exposure, config.account_assets)))
-    instrument_cap = Decimal(str(config.max_instrument_exposure))
-    remaining = total_budget
+    remaining = Decimal(str(effective_cap))
 
     for item in candidates:
         if item.rejections:
@@ -46,8 +45,7 @@ def allocate_portfolio(
         price = Decimal(str(item.max_buy_price))
         lot_size = Decimal(item.lot_size)
         lot_notional = price * lot_size
-        budget = min(instrument_cap, remaining)
-        lots = (budget / lot_notional).to_integral_value(rounding=ROUND_FLOOR)
+        lots = (remaining / lot_notional).to_integral_value(rounding=ROUND_FLOOR)
         if lots < 1:
             reasons.append(f"skipped_unaffordable:{item.instrument_id}")
             continue
