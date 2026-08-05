@@ -131,6 +131,19 @@ class TailDecisionWorkflow:
                 raw_quotes=inputs.raw_quotes,
             )
 
+        if phase == "final" and self.config.available_cash_cny is None:
+            return self._finish(
+                _decision_run(
+                    run_id=run_id,
+                    as_of=instant,
+                    status=DecisionStatus.BLOCKED,
+                    quality=inputs.quality,
+                    reasons=("available_cash_missing",),
+                    config=self.config,
+                ),
+                raw_quotes=inputs.raw_quotes,
+            )
+
         try:
             etfs, rejected_etfs = self.etf_ranker(
                 inputs.etf_contexts,

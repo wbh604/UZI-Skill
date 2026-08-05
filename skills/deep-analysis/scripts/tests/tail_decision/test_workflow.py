@@ -44,7 +44,22 @@ def test_final_phase_allocates_only_after_quality_passes():
     )
 
     assert result.status is DecisionStatus.RECOMMENDED
-    assert 0 < sum(item.notional for item in result.allocations) <= 8_000.0
+    assert 0 < sum(item.notional for item in result.allocations) <= 12_000.0
+
+
+def test_final_phase_blocks_before_strategy_when_available_cash_is_missing():
+    dependencies = workflow_dependencies()
+    dependencies["config"] = dependencies["config"].__class__(available_cash_cny=None)
+    workflow = TailDecisionWorkflow(**dependencies)
+
+    result = workflow.run(
+        as_of="2026-08-03T14:30:00+08:00",
+        phase="final",
+    )
+
+    assert result.status is DecisionStatus.BLOCKED
+    assert result.allocations == ()
+    assert result.reasons == ("available_cash_missing",)
 
 
 def test_passed_data_without_candidates_is_no_trade():

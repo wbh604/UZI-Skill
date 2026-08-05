@@ -68,12 +68,15 @@ def _eligibility_failures(
     if amount is None or amount < config.min_stock_daily_amount:
         failures.append("low_turnover")
 
+    instrument_cap = config.effective_position_cap_cny
+    if instrument_cap is None:
+        instrument_cap = config.configured_position_cap_cny
     lot_size = context.metadata.get("lot_size", config.stock_lot_size)
     if (
         not isinstance(lot_size, int)
         or isinstance(lot_size, bool)
         or lot_size <= 0
-        or context.quote.last_price * lot_size > config.max_instrument_exposure
+        or context.quote.last_price * lot_size > instrument_cap
     ):
         failures.append("minimum_lot_exceeds_cap")
 

@@ -16,8 +16,8 @@ def test_allocator_selects_only_the_best_candidate_across_etf_and_stock():
 
     allocations, reasons = allocate_portfolio([etf], [stock], DecisionConfig())
 
-    assert sum(item.notional for item in allocations) <= 8_000.0
-    assert all(item.notional <= 4_000.0 for item in allocations)
+    assert sum(item.notional for item in allocations) <= 12_000.0
+    assert all(item.notional <= 12_000.0 for item in allocations)
     assert [item.instrument_id for item in allocations] == ["513050.SH"]
 
 
@@ -49,3 +49,14 @@ def test_allocator_returns_empty_when_no_lot_fits():
 
     assert allocations == []
     assert "no_affordable_candidate" in reasons
+
+
+def test_allocator_fails_closed_when_available_cash_is_missing():
+    stock = candidate("600406.SH", kind="stock", price=25.0, lot_size=100, score=82)
+
+    allocations, reasons = allocate_portfolio(
+        [], [stock], DecisionConfig(available_cash_cny=None)
+    )
+
+    assert allocations == []
+    assert "available_cash_missing" in reasons

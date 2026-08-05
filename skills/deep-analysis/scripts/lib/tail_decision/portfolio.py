@@ -21,11 +21,14 @@ def allocate_portfolio(
         [*etfs, *stocks],
         key=lambda item: (-item.score, item.instrument_id),
     )
+    allocations: list[Allocation] = []
+    reasons: list[str] = []
+    if config.available_cash_cny is None:
+        return allocations, ["available_cash_missing"]
+
     total_budget = Decimal(str(min(config.max_total_exposure, config.account_assets)))
     instrument_cap = Decimal(str(config.max_instrument_exposure))
     remaining = total_budget
-    allocations: list[Allocation] = []
-    reasons: list[str] = []
 
     for item in candidates:
         if item.rejections:

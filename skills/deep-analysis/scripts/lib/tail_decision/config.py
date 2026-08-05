@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from hashlib import sha256
 import json
@@ -10,7 +10,7 @@ import json
 from .contracts import InstrumentType
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class DecisionConfig:
     account_assets: float = 12_000.0
     configured_position_cap_cny: float = 12_000.0
@@ -42,22 +42,6 @@ class DecisionConfig:
     stock_sell_stamp_tax_rate: float = 0.0005
     buy_slippage_bps: float = 5.0
     sell_slippage_bps: float = 5.0
-
-    def __init__(self, **kwargs: object) -> None:
-        legacy_total = kwargs.pop("max_total_exposure", None)
-        kwargs.pop("max_instrument_exposure", None)
-        if legacy_total is not None and "configured_position_cap_cny" not in kwargs:
-            kwargs["configured_position_cap_cny"] = legacy_total
-
-        valid_fields = {field.name: field for field in fields(type(self))}
-        unknown = set(kwargs) - valid_fields.keys()
-        if unknown:
-            names = ", ".join(sorted(unknown))
-            raise TypeError(f"unexpected configuration field(s): {names}")
-        for name, field in valid_fields.items():
-            value = kwargs.get(name, field.default)
-            object.__setattr__(self, name, value)
-        self.__post_init__()
 
     def __post_init__(self) -> None:
         if self.account_assets <= 0:

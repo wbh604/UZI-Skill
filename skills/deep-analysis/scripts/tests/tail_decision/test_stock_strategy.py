@@ -29,3 +29,14 @@ def test_stock_strategy_filters_st_limit_and_unaffordable_lots():
     assert "st_or_delisting" in rejected["000001.SZ"]
     assert "near_unbuyable_limit" in rejected["000002.SZ"]
     assert "minimum_lot_exceeds_cap" in rejected["600519.SH"]
+
+
+def test_stock_strategy_uses_configured_cap_when_cash_is_missing():
+    affordable = stock_context("600406.SH", price=100.0, name="fixture-stock")
+
+    candidates, rejected = rank_overnight_stocks(
+        [affordable], DecisionConfig(available_cash_cny=None)
+    )
+
+    assert [candidate.instrument_id for candidate in candidates] == ["600406.SH"]
+    assert rejected == {}

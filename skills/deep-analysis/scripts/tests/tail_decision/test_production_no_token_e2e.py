@@ -53,6 +53,6 @@ def test_production_no_token_smoke_never_uses_fixture_or_paid_provider(
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["status"] == "recommended"
-    assert payload["total_exposure"] <= 8_000.0
+    assert payload["total_exposure"] <= 12_000.0
     assert payload["ledger_events"] == 1
     assert list((tmp_path / "reports" / "tail_decision").rglob("*.json"))

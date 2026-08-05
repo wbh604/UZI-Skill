@@ -177,8 +177,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--output-root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--state-root", type=Path)
-    parser.add_argument("--account-assets", type=float, default=10_000.0)
-    parser.add_argument("--max-exposure", type=float, default=8_000.0)
+    parser.add_argument("--account-assets", type=float, default=12_000.0)
+    parser.add_argument("--max-exposure", type=float, default=12_000.0)
     parser.add_argument("--offline-fixture", action="store_true")
     return parser
 
@@ -188,8 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = DecisionConfig(
             account_assets=args.account_assets,
-            max_total_exposure=args.max_exposure,
-            max_instrument_exposure=min(4_000.0, args.max_exposure),
+            configured_position_cap_cny=args.max_exposure,
+            available_cash_cny=args.account_assets,
         )
         as_of = (
             datetime.fromisoformat(args.as_of)

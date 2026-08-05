@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from dataclasses import fields, is_dataclass
 
 import pytest
 
@@ -50,3 +51,12 @@ def test_config_rejects_non_positive_cap_or_cash():
 
 def test_config_hash_is_deterministic():
     assert config_hash(DecisionConfig()) == config_hash(DecisionConfig())
+
+
+def test_config_uses_explicit_dataclass_fields_and_rejects_legacy_kwargs():
+    assert is_dataclass(DecisionConfig)
+    assert "configured_position_cap_cny" in {
+        field.name for field in fields(DecisionConfig)
+    }
+    with pytest.raises(TypeError):
+        DecisionConfig(max_total_exposure=8_000.0)

@@ -34,7 +34,7 @@ def test_cli_runs_without_tushare_token(tmp_path, monkeypatch):
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["status"] in {"recommended", "watch_only", "no_trade"}
-    assert payload["total_exposure"] <= 8_000.0
+    assert payload["total_exposure"] <= 12_000.0
     assert list(Path(tmp_path).rglob("*.json"))
 
 
@@ -58,6 +58,13 @@ def test_cli_accepts_a_separate_forward_state_root(tmp_path):
     )
 
     assert args.state_root == state_root
+
+
+def test_cli_defaults_to_12000_position_cap():
+    args = cli._parser().parse_args(["--phase", "preview"])
+
+    assert args.account_assets == 12_000.0
+    assert args.max_exposure == 12_000.0
 
 
 def test_final_cli_advances_the_append_only_paper_ledger(tmp_path):
