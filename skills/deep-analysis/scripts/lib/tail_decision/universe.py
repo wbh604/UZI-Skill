@@ -38,11 +38,14 @@ def build_liquid_universe(
     stock_basic: pd.DataFrame,
     etf_basic: pd.DataFrame,
     *,
-    max_stocks: int = 20,
-    max_etfs: int = 10,
+    max_stocks: int = 300,
+    max_etfs: int = 30,
     min_stock_amount_cny: float = 0.0,
     min_etf_amount_cny: float = 0.0,
     min_stock_listing_days: int = 60,
+    max_stock_lot_notional_cny: float = 12_000.0,
+    stock_lot_size: int = 100,
+    min_history_sessions: int = 20,
 ) -> Universe:
     """Rank eligible local instruments by recent average CNY turnover."""
 
@@ -52,21 +55,31 @@ def build_liquid_universe(
         raise ValueError("universe amount thresholds must be non-negative")
     if min_stock_listing_days < 0:
         raise ValueError("min_stock_listing_days must be non-negative")
+    if max_stock_lot_notional_cny <= 0:
+        raise ValueError("max_stock_lot_notional_cny must be positive")
+    if stock_lot_size <= 0:
+        raise ValueError("stock_lot_size must be positive")
+    if min_history_sessions <= 0:
+        raise ValueError("min_history_sessions must be positive")
 
     as_of = _latest_trade_date(stock_daily, fund_daily)
     stock_ids = _eligible_stock_ids(stock_basic, as_of, min_stock_listing_days)
     etf_ids = _eligible_etf_ids(etf_basic)
-    stocks = _rank_amount(
+    stocks = _rank_stocks(
         stock_daily,
         eligible=stock_ids,
         limit=max_stocks,
         minimum_cny=min_stock_amount_cny,
+        lot_notional_cap_cny=max_stock_lot_notional_cny,
+        lot_size=stock_lot_size,
+        min_history_sessions=min_history_sessions,
     )
     etfs = _rank_amount(
         fund_daily,
         eligible=etf_ids,
         limit=max_etfs,
         minimum_cny=min_etf_amount_cny,
+        min_history_sessions=min_history_sessions,
     )
     return Universe(etfs=etfs, stocks=stocks)
 
@@ -96,11 +109,12 @@ def _rank_amount(
     eligible: set[str],
     limit: int,
     minimum_cny: float,
+    min_history_sessions: int,
 ) -> tuple[str, ...]:
-    required = {"ts_code", "trade_date", "amount"}
+    required = {"ts_code", "trade_date", "close", "amount"}
     if frame.empty or not required.issubset(frame.columns) or not eligible:
         return ()
-    recent = frame.loc[:, ["ts_code", "trade_date", "amount"]].copy()
+    recent = frame.loc[:, ["ts_code", "trade_date", "close", "amount"]].copy()
     recent["ts_code"] = recent["ts_code"].astype(str).str.upper()
     recent = recent[recent["ts_code"].isin(eligible)]
     recent["trade_date"] = pd.to_datetime(
@@ -111,21 +125,72 @@ def _rank_amount(
     recent["amount_cny"] = pd.to_numeric(
         recent["amount"], errors="coerce"
     ) * 1000.0
-    recent = recent.dropna(subset=["trade_date", "amount_cny"])
+    recent["close"] = pd.to_numeric(recent["close"], errors="coerce")
+    recent = recent.dropna(subset=["trade_date", "close", "amount_cny"])
     recent = recent[recent["amount_cny"] >= 0.0]
     if recent.empty:
         return ()
     newest = (
         recent.sort_values(["ts_code", "trade_date"], kind="stable")
         .groupby("ts_code", sort=True)
-        .tail(20)
+        .tail(min_history_sessions)
     )
-    averages = newest.groupby("ts_code", sort=True)["amount_cny"].mean()
-    ranked = averages[averages >= minimum_cny].rename("average_cny").reset_index()
+    grouped = newest.groupby("ts_code", sort=True)
+    averages = grouped["amount_cny"].mean()
+    complete = grouped["trade_date"].nunique() >= min_history_sessions
+    ranked = averages[
+        (averages >= minimum_cny) & complete.reindex(averages.index, fill_value=False)
+    ].rename("average_cny").reset_index()
     ranked = ranked.sort_values(
         ["average_cny", "ts_code"],
         ascending=[False, True],
         kind="stable",
+    )
+    return tuple(ranked.head(limit)["ts_code"].tolist())
+
+
+def _rank_stocks(
+    frame: pd.DataFrame,
+    *,
+    eligible: set[str],
+    limit: int,
+    minimum_cny: float,
+    lot_notional_cap_cny: float,
+    lot_size: int,
+    min_history_sessions: int,
+) -> tuple[str, ...]:
+    required = {"ts_code", "trade_date", "close", "amount"}
+    if frame.empty or not required.issubset(frame.columns) or not eligible:
+        return ()
+    recent = frame.loc[:, ["ts_code", "trade_date", "close", "amount"]].copy()
+    recent["ts_code"] = recent["ts_code"].astype(str).str.upper()
+    recent = recent[recent["ts_code"].isin(eligible)]
+    recent["trade_date"] = pd.to_datetime(
+        recent["trade_date"].astype(str), format="%Y%m%d", errors="coerce"
+    )
+    recent["close"] = pd.to_numeric(recent["close"], errors="coerce")
+    recent["amount_cny"] = pd.to_numeric(recent["amount"], errors="coerce") * 1000.0
+    recent = recent.dropna(subset=["trade_date", "close", "amount_cny"])
+    recent = recent[(recent["close"] > 0.0) & (recent["amount_cny"] >= 0.0)]
+    if recent.empty:
+        return ()
+    newest = (
+        recent.sort_values(["ts_code", "trade_date"], kind="stable")
+        .groupby("ts_code", sort=True)
+        .tail(min_history_sessions)
+    )
+    grouped = newest.groupby("ts_code", sort=True)
+    averages = grouped["amount_cny"].mean()
+    complete = grouped["trade_date"].nunique() >= min_history_sessions
+    latest_close = grouped.tail(1).set_index("ts_code")["close"]
+    eligible_ids = averages.index[
+        (averages >= minimum_cny)
+        & complete.reindex(averages.index, fill_value=False)
+        & (latest_close.reindex(averages.index) * lot_size <= lot_notional_cap_cny)
+    ]
+    ranked = averages.loc[eligible_ids].rename("average_cny").reset_index()
+    ranked = ranked.sort_values(
+        ["average_cny", "ts_code"], ascending=[False, True], kind="stable"
     )
     return tuple(ranked.head(limit)["ts_code"].tolist())
 

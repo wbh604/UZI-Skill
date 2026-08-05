@@ -19,6 +19,7 @@ from .research_evidence import (
     load_uzi_evidence,
     merge_research_evidence,
 )
+from .funnel import CandidateFunnel, FunnelAudit, build_candidate_funnel
 from .universe import (
     Universe,
     UniverseDataError,
@@ -30,8 +31,10 @@ from .workflow import TailDecisionWorkflow
 __all__ = [
     "Allocation",
     "Candidate",
+    "CandidateFunnel",
     "DecisionRun",
     "DecisionStatus",
+    "FunnelAudit",
     "DecisionConfig",
     "DecisionRecorder",
     "InstrumentContext",
@@ -44,6 +47,7 @@ __all__ = [
     "Universe",
     "UniverseDataError",
     "build_liquid_universe",
+    "build_candidate_funnel",
     "load_universe_override",
     "load_ai_discovery",
     "load_uzi_evidence",
