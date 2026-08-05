@@ -108,9 +108,13 @@ def load_uzi_evidence(
         source = directory / "synthesis.json"
         if not source.is_file():
             continue
-        source_date = _mtime_date(source, as_of)
-        if source_date is None:
+        source_at = _mtime(source, as_of)
+        if source_at is None:
             result[directory_id] = _unavailable(directory_id, "uzi_unreadable")
+            continue
+        source_date = source_at.date()
+        if source_at > as_of:
+            result[directory_id] = _unavailable(directory_id, "uzi_future", source, source_date)
             continue
         if not _is_fresh_date(source_date, as_of.date(), max_age_days):
             result[directory_id] = _unavailable(directory_id, "uzi_stale", source, source_date)
@@ -169,7 +173,12 @@ def _ai_evidence(entry: dict, source_date: date, path: Path) -> ResearchEvidence
     uzi_score = _score(uzi.get("score"))
     coverage = _coverage(uzi.get("data_coverage"))
     decision = entry.get("uzi_decision") if isinstance(entry.get("uzi_decision"), dict) else {}
-    state = _state(decision.get("state"), has_evidence=uzi_score is not None)
+    state = _state(decision.get("state"))
+    reasons: tuple[str, ...] = ()
+    if uzi_score is not None and state is None:
+        uzi_score = None
+        coverage = None
+        reasons = ("uzi_invalid_state",)
     if ai_score is None and uzi_score is None:
         return None
     return ResearchEvidence(
@@ -177,9 +186,10 @@ def _ai_evidence(entry: dict, source_date: date, path: Path) -> ResearchEvidence
         ai_score=ai_score,
         uzi_score=uzi_score,
         uzi_coverage=coverage,
-        uzi_state=state,
+        uzi_state=state or "unavailable",
         source_dates=(source_date.isoformat(),),
         source_paths=(str(path),),
+        reasons=reasons,
     )
 
 
@@ -190,7 +200,9 @@ def _uzi_evidence(
     coverage = _coverage(payload.get("data_coverage"))
     if score is None or coverage is None:
         return _unavailable(instrument_id, "uzi_invalid_payload", source, source_date)
-    state = _state(payload.get("uzi_decision_state"), has_evidence=True)
+    state = _state(payload.get("uzi_decision_state"))
+    if state is None:
+        return _unavailable(instrument_id, "uzi_invalid_state", source, source_date)
     reasons = ("uzi_blocked",) if state == "blocked" else ()
     return ResearchEvidence(
         instrument_id=instrument_id,
@@ -265,9 +277,9 @@ def _parse_date(value: object) -> date | None:
         return None
 
 
-def _mtime_date(path: Path, as_of: datetime) -> date | None:
+def _mtime(path: Path, as_of: datetime) -> datetime | None:
     try:
-        return datetime.fromtimestamp(path.stat().st_mtime, tz=as_of.tzinfo).date()
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=as_of.tzinfo)
     except OSError:
         return None
 
@@ -297,9 +309,7 @@ def _coverage(value: object) -> float | None:
     return coverage if math.isfinite(coverage) and 0.0 <= coverage <= 1.0 else None
 
 
-def _state(value: object, *, has_evidence: bool) -> str:
-    if value == "blocked":
-        return "blocked"
-    if value == "approved" or has_evidence:
-        return "approved"
-    return "unavailable"
+def _state(value: object) -> str | None:
+    if value == "approved" or value == "blocked":
+        return value
+    return None

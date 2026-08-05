@@ -84,6 +84,7 @@ def test_ai_discovery_merges_hints_for_same_candidate_across_both_lists(tmp_path
         "review_queue": [{
             "code": "300170.SZ",
             "uzi": {"score": 69.0, "data_coverage": 0.70},
+            "uzi_decision": {"state": "approved"},
         }],
     }), encoding="utf-8")
 
@@ -148,6 +149,87 @@ def test_uzi_stale_cache_degrades_to_unavailable(tmp_path):
 
     assert evidence["300759.SZ"].uzi_state == "unavailable"
     assert "uzi_stale" in evidence["300759.SZ"].reasons
+
+
+def test_uzi_unknown_decision_state_removes_positive_evidence(tmp_path):
+    cache = tmp_path / "300759.SZ"
+    write_uzi_cache(
+        cache, overall_score=72.0, data_coverage=0.68,
+        panel_consensus=66.0, blocked=False,
+    )
+    source = cache / "synthesis.json"
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["uzi_decision_state"] = "nonsense"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence = load_uzi_evidence(
+        tmp_path, ["300759.SZ"], aware_at(2026, 8, 5)
+    )["300759.SZ"]
+
+    assert evidence.uzi_state == "unavailable"
+    assert evidence.uzi_score is None
+    assert evidence.uzi_coverage is None
+    assert "uzi_invalid_state" in evidence.reasons
+
+
+def test_uzi_malformed_decision_state_degrades_without_an_exception(tmp_path):
+    cache = tmp_path / "300759.SZ"
+    write_uzi_cache(
+        cache, overall_score=72.0, data_coverage=0.68,
+        panel_consensus=66.0, blocked=False,
+    )
+    source = cache / "synthesis.json"
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["uzi_decision_state"] = ["approved"]
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence = load_uzi_evidence(
+        tmp_path, ["300759.SZ"], aware_at(2026, 8, 5)
+    )["300759.SZ"]
+
+    assert evidence.uzi_state == "unavailable"
+    assert evidence.uzi_score is None
+    assert "uzi_invalid_state" in evidence.reasons
+
+
+def test_future_uzi_cache_timestamp_degrades_to_unavailable(tmp_path):
+    cache = tmp_path / "300759.SZ"
+    write_uzi_cache(
+        cache, overall_score=72.0, data_coverage=0.68,
+        panel_consensus=66.0, blocked=False,
+    )
+    source = cache / "synthesis.json"
+    future = datetime(2026, 8, 5, 12, 1, tzinfo=SHANGHAI).timestamp()
+    os.utime(source, (future, future))
+
+    evidence = load_uzi_evidence(
+        tmp_path, ["300759.SZ"], aware_at(2026, 8, 5)
+    )["300759.SZ"]
+
+    assert evidence.uzi_state == "unavailable"
+    assert evidence.uzi_score is None
+    assert "uzi_future" in evidence.reasons
+
+
+def test_uzi_ticker_directory_mismatch_removes_positive_evidence(tmp_path):
+    cache = tmp_path / "300759.SZ"
+    write_uzi_cache(
+        cache, overall_score=72.0, data_coverage=0.68,
+        panel_consensus=66.0, blocked=False,
+    )
+    source = cache / "synthesis.json"
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["ticker"] = "600489.SH"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence = load_uzi_evidence(
+        tmp_path, ["300759.SZ"], aware_at(2026, 8, 5)
+    )["300759.SZ"]
+
+    assert evidence.uzi_state == "unavailable"
+    assert evidence.uzi_score is None
+    assert evidence.uzi_coverage is None
+    assert "uzi_code_mismatch" in evidence.reasons
 
 
 def test_merge_normalizes_ids_and_preserves_explicit_uzi_block():
