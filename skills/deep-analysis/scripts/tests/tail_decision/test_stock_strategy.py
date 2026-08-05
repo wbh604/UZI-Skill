@@ -16,6 +16,12 @@ def with_research_evidence(context, **evidence):
     return replace(context, metadata=metadata)
 
 
+def with_as_of(context, as_of):
+    metadata = dict(context.metadata)
+    metadata["as_of"] = as_of
+    return replace(context, metadata=metadata)
+
+
 def valid_stocks(count: int):
     return [
         stock_context(
@@ -119,6 +125,123 @@ def test_malformed_research_evidence_is_audited_without_positive_claims():
     assert [item.instrument_id for item in candidates] == ["300759.SZ"]
     assert "uzi_unavailable" in candidates[0].reasons
     assert not any(reason.startswith("uzi_score:") for reason in candidates[0].reasons)
+    assert rejected == {}
+
+
+def test_boolean_evidence_values_are_unavailable_without_positive_claims():
+    context = with_research_evidence(
+        stock_context("300759.SZ", price=18.0, name="康龙化成"),
+        ai_score=True,
+        uzi_score=True,
+        uzi_coverage=True,
+        uzi_state="approved",
+    )
+
+    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+    assert "uzi_unavailable" in candidates[0].reasons
+    assert not any(
+        reason.startswith(("ai_discovery_score:", "uzi_score:", "uzi_coverage:"))
+        for reason in candidates[0].reasons
+    )
+    assert rejected == {}
+
+
+def test_out_of_range_or_nonfinite_evidence_values_are_not_approved():
+    context = with_research_evidence(
+        stock_context("300759.SZ", price=18.0, name="康龙化成"),
+        ai_score=101.0,
+        uzi_score=float("inf"),
+        uzi_coverage=1.1,
+        uzi_state="approved",
+    )
+
+    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+    assert "uzi_unavailable" in candidates[0].reasons
+    assert not any(
+        reason.startswith(("ai_discovery_score:", "uzi_score:", "uzi_coverage:"))
+        for reason in candidates[0].reasons
+    )
+    assert rejected == {}
+
+
+def test_evidence_dates_are_canonical_and_not_future_when_context_has_as_of():
+    context = with_research_evidence(
+        stock_context("300759.SZ", price=18.0, name="康龙化成"),
+        uzi_score=71.0,
+        uzi_coverage=0.68,
+        uzi_state="approved",
+        source_dates=["2026-08-05", "2026-08-06", "2026-08-05T00:00:00", "not-a-date"],
+    )
+    context = with_as_of(context, "2026-08-05")
+
+    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+    assert "evidence_date:2026-08-05" in candidates[0].reasons
+    assert not any(
+        reason.startswith("evidence_date:") and reason != "evidence_date:2026-08-05"
+        for reason in candidates[0].reasons
+    )
+    assert rejected == {}
+
+
+def test_audit_text_ignores_malformed_structures_and_oversized_values():
+    context = with_research_evidence(
+        stock_context("300759.SZ", price=18.0, name="康龙化成"),
+        uzi_score=71.0,
+        uzi_coverage=0.68,
+        uzi_state="approved",
+        source_dates="2026-08-05",
+        reasons={"uzi_valid"},
+    )
+
+    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+    assert not any(reason.startswith("evidence_date:") for reason in candidates[0].reasons)
+    assert not any(reason.startswith("evidence_reason:") for reason in candidates[0].reasons)
+    assert rejected == {}
+
+    context = with_research_evidence(
+        stock_context("300760.SZ", price=18.0, name="迈瑞医疗"),
+        uzi_score=71.0,
+        uzi_coverage=0.68,
+        uzi_state="approved",
+        source_dates=["2026-08-05", "x" * 500, "bad\ntext"],
+        reasons=["uzi_valid", "x" * 500, "bad\nreason", ["nested"]],
+    )
+
+    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+    assert "evidence_date:2026-08-05" in candidates[0].reasons
+    assert "evidence_reason:uzi_valid" in candidates[0].reasons
+    assert not any("x" * 100 in reason or "\n" in reason for reason in candidates[0].reasons)
+    assert rejected == {}
+
+
+def test_compact_audit_reasons_are_bounded_and_deterministic():
+    context = with_research_evidence(
+        stock_context("300759.SZ", price=18.0, name="康龙化成"),
+        ai_score=82.0,
+        uzi_score=71.0,
+        uzi_coverage=0.68,
+        uzi_state="approved",
+        source_dates=["2026-08-03", "2026-08-01", "2026-08-02"],
+        reasons=["uzi_z", "uzi_a", "uzi_m"],
+    )
+
+    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+    assert candidates[0].reasons[-7:] == (
+        "ai_discovery_score:82.0",
+        "uzi_score:71.0",
+        "uzi_coverage:0.68",
+        "evidence_date:2026-08-01",
+        "evidence_date:2026-08-02",
+        "evidence_reason:uzi_a",
+        "evidence_reason:uzi_m",
+    )
+    assert len(candidates[0].reasons) == 10
     assert rejected == {}
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date, datetime
 from math import isfinite
+import re
 from typing import Iterable
 
 from .config import DecisionConfig
@@ -13,6 +15,12 @@ from .contracts import (
     InstrumentType,
     QualityLevel,
 )
+
+
+_MAX_AUDIT_ITEMS = 2
+_MAX_AUDIT_REASON_LENGTH = 80
+_MAX_AUDIT_REASONS = 7
+_SAFE_AUDIT_REASON = re.compile(r"^[\w.:-]+$", re.ASCII)
 
 
 def rank_overnight_stocks(
@@ -176,6 +184,8 @@ def _candidate(context: InstrumentContext, config: DecisionConfig) -> Candidate:
 
 
 def _number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -202,15 +212,25 @@ def _research_audit_reasons(context: InstrumentContext) -> tuple[str, ...]:
         reasons.append(f"ai_discovery_score:{ai_score:.1f}")
     uzi_score = _bounded_number(evidence.get("uzi_score"), 0.0, 100.0)
     coverage = _bounded_number(evidence.get("uzi_coverage"), 0.0, 1.0)
-    if uzi_score is not None:
+    uzi_available = (
+        _uzi_state(context) in ("approved", "blocked")
+        and uzi_score is not None
+        and coverage is not None
+    )
+    if uzi_available:
         reasons.append(f"uzi_score:{uzi_score:.1f}")
-    if coverage is not None:
         reasons.append(f"uzi_coverage:{coverage:.2f}")
-    if _uzi_state(context) is None or uzi_score is None or coverage is None:
+    else:
         reasons.append("uzi_unavailable")
-    reasons.extend(f"evidence_date:{value}" for value in _audit_strings(evidence.get("source_dates")))
-    reasons.extend(f"evidence_reason:{value}" for value in _audit_strings(evidence.get("reasons")))
-    return tuple(reasons)
+    reasons.extend(
+        f"evidence_date:{value}"
+        for value in _audit_dates(evidence.get("source_dates"), context)
+    )
+    reasons.extend(
+        f"evidence_reason:{value}"
+        for value in _audit_reasons(evidence.get("reasons"))
+    )
+    return tuple(reasons[:_MAX_AUDIT_REASONS])
 
 
 def _bounded_number(value: object, minimum: float, maximum: float) -> float | None:
@@ -218,13 +238,49 @@ def _bounded_number(value: object, minimum: float, maximum: float) -> float | No
     return number if number is not None and minimum <= number <= maximum else None
 
 
-def _audit_strings(value: object) -> tuple[str, ...]:
+def _audit_dates(value: object, context: InstrumentContext) -> tuple[str, ...]:
     if not isinstance(value, (tuple, list)):
         return ()
-    return tuple(
+    as_of = _context_as_of_date(context)
+    dates: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        try:
+            parsed = date.fromisoformat(item)
+        except ValueError:
+            continue
+        if item != parsed.isoformat() or (as_of is not None and parsed > as_of):
+            continue
+        dates.add(item)
+    return tuple(sorted(dates)[:_MAX_AUDIT_ITEMS])
+
+
+def _context_as_of_date(context: InstrumentContext) -> date | None:
+    value = context.metadata.get("as_of")
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if value == parsed.isoformat() else None
+    return None
+
+
+def _audit_reasons(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (tuple, list)):
+        return ()
+    accepted = {
         item for item in value
-        if isinstance(item, str) and item.strip()
-    )
+        if isinstance(item, str)
+        and 0 < len(item) <= _MAX_AUDIT_REASON_LENGTH
+        and _SAFE_AUDIT_REASON.fullmatch(item) is not None
+    }
+    return tuple(sorted(accepted)[:_MAX_AUDIT_ITEMS])
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
