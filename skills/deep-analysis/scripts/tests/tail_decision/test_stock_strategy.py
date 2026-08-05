@@ -166,56 +166,38 @@ def test_out_of_range_or_nonfinite_evidence_values_are_not_approved():
     assert rejected == {}
 
 
-def test_evidence_dates_are_canonical_and_not_future_when_context_has_as_of():
+def test_valid_evidence_dates_are_canonical_and_not_future_when_context_has_as_of():
     context = with_research_evidence(
         stock_context("300759.SZ", price=18.0, name="康龙化成"),
         uzi_score=71.0,
         uzi_coverage=0.68,
         uzi_state="approved",
-        source_dates=["2026-08-05", "2026-08-06", "2026-08-05T00:00:00", "not-a-date"],
+        source_dates=["2026-08-05"],
     )
     context = with_as_of(context, "2026-08-05")
 
     candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
 
     assert "evidence_date:2026-08-05" in candidates[0].reasons
-    assert not any(
-        reason.startswith("evidence_date:") and reason != "evidence_date:2026-08-05"
-        for reason in candidates[0].reasons
-    )
     assert rejected == {}
 
 
-def test_audit_text_ignores_malformed_structures_and_oversized_values():
+def test_valid_compact_audit_text_is_emitted_without_source_path_leakage():
     context = with_research_evidence(
         stock_context("300759.SZ", price=18.0, name="康龙化成"),
         uzi_score=71.0,
         uzi_coverage=0.68,
         uzi_state="approved",
-        source_dates="2026-08-05",
-        reasons={"uzi_valid"},
-    )
-
-    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
-
-    assert not any(reason.startswith("evidence_date:") for reason in candidates[0].reasons)
-    assert not any(reason.startswith("evidence_reason:") for reason in candidates[0].reasons)
-    assert rejected == {}
-
-    context = with_research_evidence(
-        stock_context("300760.SZ", price=18.0, name="迈瑞医疗"),
-        uzi_score=71.0,
-        uzi_coverage=0.68,
-        uzi_state="approved",
-        source_dates=["2026-08-05", "x" * 500, "bad\ntext"],
-        reasons=["uzi_valid", "x" * 500, "bad\nreason", ["nested"]],
+        source_dates=["2026-08-05"],
+        reasons=["uzi_valid"],
+        source_paths=["cache/synthesis.json"],
     )
 
     candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
 
     assert "evidence_date:2026-08-05" in candidates[0].reasons
     assert "evidence_reason:uzi_valid" in candidates[0].reasons
-    assert not any("x" * 100 in reason or "\n" in reason for reason in candidates[0].reasons)
+    assert not any("source_path" in reason for reason in candidates[0].reasons)
     assert rejected == {}
 
 
@@ -226,8 +208,8 @@ def test_compact_audit_reasons_are_bounded_and_deterministic():
         uzi_score=71.0,
         uzi_coverage=0.68,
         uzi_state="approved",
-        source_dates=["2026-08-03", "2026-08-01", "2026-08-02"],
-        reasons=["uzi_z", "uzi_a", "uzi_m"],
+        source_dates=["2026-08-02", "2026-08-01"],
+        reasons=["uzi_z", "uzi_a"],
     )
 
     candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
@@ -239,10 +221,84 @@ def test_compact_audit_reasons_are_bounded_and_deterministic():
         "evidence_date:2026-08-01",
         "evidence_date:2026-08-02",
         "evidence_reason:uzi_a",
-        "evidence_reason:uzi_m",
+        "evidence_reason:uzi_z",
     )
     assert len(candidates[0].reasons) == 10
     assert rejected == {}
+
+
+def test_missing_optional_uzi_provenance_keeps_complete_uzi_evidence_available():
+    context = with_research_evidence(
+        stock_context("300759.SZ", price=18.0, name="康龙化成"),
+        uzi_score=71.0,
+        uzi_coverage=0.68,
+        uzi_state="approved",
+    )
+
+    candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+    assert "uzi_score:71.0" in candidates[0].reasons
+    assert "uzi_coverage:0.68" in candidates[0].reasons
+    assert "uzi_unavailable" not in candidates[0].reasons
+    assert rejected == {}
+
+
+def test_malformed_present_uzi_dates_invalidate_the_whole_uzi_payload():
+    invalid_date_values = (
+        ["2026-08-05", "not-a-date"],
+        "2026-08-05",
+        {"2026-08-05"},
+        {"date": "2026-08-05"},
+        ["2026-08-01", "2026-08-02", "2026-08-03"],
+    )
+
+    for index, source_dates in enumerate(invalid_date_values):
+        context = with_research_evidence(
+            stock_context(f"3007{60 + index:02d}.SZ", price=18.0, name=f"S{index}"),
+            uzi_score=71.0,
+            uzi_coverage=0.68,
+            uzi_state="approved",
+            source_dates=source_dates,
+        )
+        candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+        assert "uzi_unavailable" in candidates[0].reasons
+        assert not any(
+            reason.startswith(("uzi_score:", "uzi_coverage:", "evidence_date:", "evidence_reason:"))
+            for reason in candidates[0].reasons
+        )
+        assert rejected == {}
+
+
+def test_malformed_present_uzi_reasons_or_paths_invalidate_the_whole_payload():
+    invalid_provenance = (
+        {"reasons": ["uzi_valid", "bad\nreason"]},
+        {"reasons": "uzi_valid"},
+        {"reasons": {"uzi_valid"}},
+        {"reasons": {"reason": "uzi_valid"}},
+        {"reasons": ["uzi_a", "uzi_b", "uzi_c"]},
+        {"source_paths": "cache/synthesis.json"},
+        {"source_paths": ["cache/synthesis.json", "x" * 500]},
+        {"source_paths": {"path": "cache/synthesis.json"}},
+    )
+
+    for index, provenance in enumerate(invalid_provenance):
+        context = with_research_evidence(
+            stock_context(f"3010{index:02d}.SZ", price=18.0, name=f"P{index}"),
+            uzi_score=71.0,
+            uzi_coverage=0.68,
+            uzi_state="approved",
+            **provenance,
+        )
+        candidates, rejected = rank_overnight_stocks((context,), DecisionConfig())
+
+        assert "uzi_unavailable" in candidates[0].reasons
+        assert not any(
+            reason.startswith(("uzi_score:", "uzi_coverage:", "evidence_date:", "evidence_reason:"))
+            for reason in candidates[0].reasons
+        )
+        assert not any("source_path" in reason for reason in candidates[0].reasons)
+        assert rejected == {}
 
 
 def test_stock_ranker_returns_at_most_three_candidates_by_default():
