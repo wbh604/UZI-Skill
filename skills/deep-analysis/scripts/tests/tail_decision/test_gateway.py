@@ -1,5 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timedelta
+import json
+import os
 from pathlib import Path
 import sys
 from zoneinfo import ZoneInfo
@@ -101,6 +103,55 @@ class _Archive:
         return ["20260803", "20260804"]
 
 
+def broad_archive(stock_count=320):
+    archive = _Archive()
+    dates = pd.date_range("2026-07-06", periods=20, freq="B")
+    stock_ids = tuple(f"{600000 + index:06d}.SH" for index in range(stock_count))
+    archive.stock_daily = pd.DataFrame([
+        {
+            "ts_code": instrument_id,
+            "trade_date": trade_date.strftime("%Y%m%d"),
+            "close": 10.0,
+            "amount": 600_000.0,
+        }
+        for instrument_id in stock_ids
+        for trade_date in dates
+    ])
+    archive.stock_basic = pd.DataFrame([
+        {
+            "ts_code": instrument_id,
+            "name": f"Name {index}",
+            "industry": "fixture",
+            "list_date": "20200101",
+        }
+        for index, instrument_id in enumerate(stock_ids)
+    ])
+    original_read_recent = archive.read_recent
+    original_read_static = archive.read_static
+
+    def read_recent(dataset, as_of, partition_count, *, required=True):
+        if dataset == "daily_basic":
+            return pd.DataFrame([
+                {"ts_code": instrument_id, "trade_date": "20260731", "turnover_rate": 2.0}
+                for instrument_id in stock_ids
+            ])
+        if dataset == "moneyflow":
+            return pd.DataFrame([
+                {"ts_code": instrument_id, "trade_date": "20260731", "net_mf_amount": 10_000.0}
+                for instrument_id in stock_ids
+            ])
+        return original_read_recent(dataset, as_of, partition_count, required=required)
+
+    def read_static(dataset, candidates, *, required=True):
+        if dataset == "stock_basic":
+            return archive.stock_basic.copy()
+        return original_read_static(dataset, candidates, required=required)
+
+    archive.read_recent = read_recent
+    archive.read_static = read_static
+    return archive
+
+
 class _QuoteProvider:
     def __init__(self, name: str, price_offset: float):
         self.name = name
@@ -130,6 +181,21 @@ class _QuoteProvider:
         return quotes
 
 
+class RecordingQuoteProvider(_QuoteProvider):
+    def __init__(self, name="eastmoney", price_offset=0.0):
+        super().__init__(name, price_offset)
+        self.requested_ids = ()
+
+    def fetch_quotes(self, ids, now):
+        self.requested_ids = tuple(ids)
+        return super().fetch_quotes(ids, now)
+
+
+class MatchingQuoteProvider(_QuoteProvider):
+    def __init__(self):
+        super().__init__("tencent", 0.001)
+
+
 class _Announcements:
     def fetch(self, instrument_id, as_of):
         return (
@@ -156,6 +222,42 @@ def _gateway(tmp_path, announcement_provider=None):
             stocks=("600001.SH",),
         ),
     )
+
+
+def production_gateway(
+    tmp_path,
+    *,
+    archive=None,
+    providers=None,
+    research_root=None,
+    uzi_cache_root=None,
+):
+    return CredentialFreeGateway(
+        config=DecisionConfig(),
+        archive_reader=archive or _Archive(),
+        snapshot_store=QuoteSnapshotStore(tmp_path),
+        quote_providers=providers or (_QuoteProvider("eastmoney", 0.0), MatchingQuoteProvider()),
+        announcement_provider=_Announcements(),
+        research_root=research_root,
+        uzi_cache_root=uzi_cache_root,
+    )
+
+
+def write_uzi_cache(root, instrument_id, *, overall_score=71.0, blocked=False, malformed=False):
+    cache = root / instrument_id
+    cache.mkdir(parents=True)
+    source = cache / "synthesis.json"
+    source.write_text(
+        "not-json" if malformed else json.dumps({
+            "ticker": instrument_id,
+            "overall_score": overall_score,
+            "data_coverage": 0.70,
+            "uzi_decision_state": "blocked" if blocked else "approved",
+        }),
+        encoding="utf-8",
+    )
+    timestamp = _at(12).timestamp()
+    os.utime(source, (timestamp, timestamp))
 
 
 def test_gateway_builds_production_contexts_from_archive_and_forward_snapshots(tmp_path):
@@ -233,3 +335,79 @@ def test_gateway_persists_mixed_quote_dates_without_cross_day_append_failure(tmp
     snapshot_root = tmp_path / "cache" / "tail_decision" / "snapshots"
     assert (snapshot_root / "20260803.jsonl").is_file()
     assert (snapshot_root / "20260804.jsonl").is_file()
+
+
+def test_gateway_quotes_only_observation_pool_and_audits_research_count(tmp_path):
+    archive = broad_archive(stock_count=320)
+    provider = RecordingQuoteProvider()
+    inputs = production_gateway(
+        tmp_path,
+        archive=archive,
+        providers=(provider, MatchingQuoteProvider()),
+    ).collect(as_of=_at(14, 10), phase="preview")
+
+    assert inputs.raw_quotes["funnel_audit"]["research_stocks"] >= 300
+    assert inputs.raw_quotes["funnel_audit"]["observation_stocks"] == 30
+    assert len([item for item in provider.requested_ids if item.endswith((".SH", ".SZ")) and not item.startswith(("510", "159"))]) <= 30
+
+
+def test_gateway_passes_aware_as_of_to_funnel(monkeypatch, tmp_path):
+    import lib.tail_decision.gateway as gateway_module
+
+    observed = []
+    real_builder = gateway_module.build_candidate_funnel
+
+    def recording_builder(*args, **kwargs):
+        observed.append(kwargs["as_of"])
+        return real_builder(*args, **kwargs)
+
+    monkeypatch.setattr(gateway_module, "build_candidate_funnel", recording_builder)
+    as_of = _at(14, 10)
+    production_gateway(tmp_path, archive=broad_archive()).collect(as_of=as_of, phase="preview")
+
+    assert observed == [as_of]
+
+
+def test_gateway_attaches_compact_fresh_evidence_and_excludes_blocked_name(tmp_path):
+    research_root = tmp_path / "research"
+    research_root.mkdir()
+    (research_root / "weekly_candidates_20260804.json").write_text(json.dumps({
+        "as_of": "2026-08-04",
+        "candidates": [{"code": "600001.SH", "score": 82.0}],
+        "review_queue": [],
+    }), encoding="utf-8")
+    uzi_root = tmp_path / "uzi"
+    write_uzi_cache(uzi_root, "600001.SH")
+    write_uzi_cache(uzi_root, "600002.SH", blocked=True)
+    archive = broad_archive(stock_count=320)
+    inputs = production_gateway(
+        tmp_path,
+        archive=archive,
+        research_root=research_root,
+        uzi_cache_root=uzi_root,
+    ).collect(as_of=_at(14, 30), phase="final")
+
+    stock = next(item for item in inputs.stock_contexts if item.instrument_id == "600001.SH")
+    evidence = stock.metadata["research_evidence"]
+    assert evidence["ai_score"] == 82.0
+    assert evidence["uzi_score"] == 71.0
+    assert evidence["uzi_state"] == "approved"
+    assert stock.quote.timestamp == _at(14, 30)
+    assert "600002.SH" not in [item.instrument_id for item in inputs.stock_contexts]
+    assert inputs.raw_quotes["research_evidence"]["600002.SH"]["uzi_state"] == "blocked"
+    assert "synthesis.json" in " ".join(evidence["source_paths"])
+
+
+def test_gateway_isolates_missing_and_malformed_evidence_per_instrument(tmp_path):
+    uzi_root = tmp_path / "uzi"
+    write_uzi_cache(uzi_root, "600001.SH", malformed=True)
+    inputs = production_gateway(
+        tmp_path,
+        archive=broad_archive(stock_count=320),
+        uzi_cache_root=uzi_root,
+    ).collect(as_of=_at(14, 10), phase="preview")
+
+    by_id = {item.instrument_id: item for item in inputs.stock_contexts}
+    assert by_id["600001.SH"].metadata["research_evidence"]["uzi_state"] == "unavailable"
+    assert "uzi_invalid_json" in by_id["600001.SH"].metadata["research_evidence"]["reasons"]
+    assert by_id["600002.SH"].metadata["research_evidence"]["reasons"] == ("uzi_missing",)

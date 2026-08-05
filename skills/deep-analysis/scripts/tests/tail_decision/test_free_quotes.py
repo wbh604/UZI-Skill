@@ -154,6 +154,42 @@ def test_tencent_parser_skips_one_malformed_quote_without_discarding_batch():
     assert set(quotes) == {"600406.SH"}
 
 
+def test_one_malformed_symbol_does_not_discard_other_batch_quotes():
+    def fake_batch_with_one_malformed_record(url, *, params, headers, timeout):
+        def response(symbol, price):
+            parts = [""] * 50
+            parts[3] = price
+            parts[4] = "10.00"
+            parts[5] = "10.10"
+            parts[6] = "1000"
+            parts[30] = "20260803141030"
+            parts[33] = "10.30"
+            parts[34] = "10.00"
+            parts[37] = "100.0"
+            return f'v_{symbol}="{"~".join(parts)}";'
+
+        class Response:
+            encoding = None
+
+            def raise_for_status(self):
+                return None
+
+            @property
+            def text(self):
+                return response("sh600001", "10.20") + response("sh600002", "bad")
+
+        return Response()
+
+    class Session:
+        get = staticmethod(fake_batch_with_one_malformed_record)
+
+    provider = TencentQuoteProvider(session=Session())
+    quotes = provider.fetch_quotes(["600001.SH", "600002.SH"], NOW)
+
+    assert quotes["600001.SH"].last_price == 10.20
+    assert "600002.SH" not in quotes
+
+
 def test_eastmoney_retries_one_transient_request_failure():
     class Response:
         def raise_for_status(self):

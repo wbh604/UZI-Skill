@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
+from pathlib import Path
 from statistics import median
 from typing import Mapping, Sequence
 
@@ -13,8 +14,10 @@ from .contracts import InstrumentContext, InstrumentType
 from .event_risk import evaluate_event_risk
 from .features import build_historical_features, build_intraday_features
 from .free_quotes import QuoteProvider, fetch_from_providers
+from .funnel import build_candidate_funnel
 from .quality import evaluate_quote_quality
-from .universe import Universe, build_liquid_universe
+from .research_evidence import ResearchEvidence, load_ai_discovery, load_uzi_evidence, merge_research_evidence
+from .universe import Universe, UniverseDataError, build_liquid_universe
 from .workflow import WorkflowInputs
 
 
@@ -30,6 +33,8 @@ class CredentialFreeGateway:
         quote_providers: Sequence[QuoteProvider],
         announcement_provider,
         universe_override: Universe | None = None,
+        research_root: Path | None = None,
+        uzi_cache_root: Path | None = None,
     ) -> None:
         self.config = config
         self.archive_reader = archive_reader
@@ -37,24 +42,41 @@ class CredentialFreeGateway:
         self.quote_providers = tuple(quote_providers)
         self.announcement_provider = announcement_provider
         self.universe_override = universe_override
+        self.research_root = research_root
+        self.uzi_cache_root = uzi_cache_root
 
     def collect(self, *, as_of: datetime, phase: str) -> WorkflowInputs:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("as_of must be timezone-aware")
 
         archive = self._read_archive(as_of)
-        universe = self.universe_override or build_liquid_universe(
-            archive["daily"],
-            archive["fund_daily"],
-            archive["stock_basic"],
-            archive["etf_basic"],
-            min_stock_amount_cny=self.config.min_stock_daily_amount,
-            min_etf_amount_cny=self.config.min_etf_daily_amount,
-            min_stock_listing_days=self.config.min_stock_listing_days,
-        )
-        instrument_ids = (*universe.etfs, *universe.stocks)
-        if not instrument_ids:
+        try:
+            universe = self.universe_override or build_liquid_universe(
+                archive["daily"], archive["fund_daily"], archive["stock_basic"], archive["etf_basic"],
+                max_stocks=self.config.research_stock_limit,
+                min_stock_amount_cny=self.config.min_stock_daily_amount,
+                min_etf_amount_cny=self.config.min_etf_daily_amount,
+                min_stock_listing_days=self.config.min_stock_listing_days,
+                max_stock_lot_notional_cny=(self.config.effective_position_cap_cny or self.config.configured_position_cap_cny),
+            )
+        except UniverseDataError:
+            return WorkflowInputs(system_errors=("universe_data_error",))
+        research_ids = (*universe.etfs, *universe.stocks)
+        if not research_ids:
             return WorkflowInputs(system_errors=("empty_eligible_universe",))
+        ai_evidence = load_ai_discovery(self.research_root, as_of.date()) if self.research_root is not None else {}
+        uzi_evidence = load_uzi_evidence(self.uzi_cache_root, research_ids, as_of) if self.uzi_cache_root is not None else {}
+        funnel = build_candidate_funnel(
+            universe, archive["daily"], archive["fund_daily"],
+            merge_research_evidence(ai_evidence, uzi_evidence),
+            as_of=as_of,
+            max_stocks=self.config.realtime_stock_limit,
+            max_etfs=self.config.realtime_etf_limit,
+            research_stock_target=self.config.research_stock_limit,
+        )
+        instrument_ids = (*funnel.observation.etfs, *funnel.observation.stocks)
+        if not instrument_ids:
+            return WorkflowInputs(system_errors=("empty_observation_universe",))
 
         quotes = fetch_from_providers(self.quote_providers, instrument_ids, as_of)
         if any(quotes.values()):
@@ -94,7 +116,7 @@ class CredentialFreeGateway:
                 etf_history.get(instrument_id, {}),
                 archive["etf_basic"],
             )
-            for instrument_id in universe.etfs
+            for instrument_id in funnel.observation.etfs
         )
         stock_contexts = tuple(
             self._stock_context(
@@ -104,8 +126,9 @@ class CredentialFreeGateway:
                 stock_history.get(instrument_id, {}),
                 archive,
                 previous_close,
+                funnel.evidence.get(instrument_id, ResearchEvidence(instrument_id)),
             )
-            for instrument_id in universe.stocks
+            for instrument_id in funnel.observation.stocks
         )
         return WorkflowInputs(
             quality=quality,
@@ -115,6 +138,8 @@ class CredentialFreeGateway:
                 "mode": "credential_free",
                 "phase": phase,
                 "quotes": quotes,
+                "funnel_audit": _funnel_audit(funnel.audit),
+                "research_evidence": _compact_evidence(funnel.evidence),
             },
         )
 
@@ -208,6 +233,7 @@ class CredentialFreeGateway:
         historical: Mapping[str, object],
         archive: Mapping[str, pd.DataFrame],
         previous_close: datetime,
+        research_evidence: ResearchEvidence,
     ) -> InstrumentContext:
         master = _row_for(archive["stock_basic"], instrument_id)
         st_row = _row_for(archive["stock_st"], instrument_id)
@@ -244,6 +270,7 @@ class CredentialFreeGateway:
             "listing_days": listing_days,
             "limit_up": _first_number(limit_row, "up_limit", "limit_up"),
             "limit_down": _first_number(limit_row, "down_limit", "limit_down"),
+            "research_evidence": _compact_one_evidence(research_evidence),
         }
         return InstrumentContext(
             instrument_id=instrument_id,
@@ -329,3 +356,39 @@ def _cross_source_price_deviation(quotes) -> float | None:
     if center <= 0:
         return None
     return (max(prices) - min(prices)) / center * 100.0
+
+
+def _funnel_audit(audit) -> dict[str, object]:
+    return {
+        "base_stocks": audit.base_stocks,
+        "research_stocks": audit.research_stocks,
+        "observation_stocks": audit.observation_stocks,
+        "research_etfs": audit.research_etfs,
+        "observation_etfs": audit.observation_etfs,
+        "reasons": audit.reasons,
+    }
+
+
+def _compact_evidence(
+    evidence: Mapping[str, ResearchEvidence],
+) -> dict[str, dict[str, object]]:
+    return {
+        instrument_id: _compact_one_evidence(item)
+        for instrument_id, item in evidence.items()
+        if item.ai_score is not None
+        or item.uzi_score is not None
+        or item.uzi_state == "blocked"
+        or item.reasons != ("uzi_missing",)
+    }
+
+
+def _compact_one_evidence(evidence: ResearchEvidence) -> dict[str, object]:
+    return {
+        "ai_score": evidence.ai_score,
+        "uzi_score": evidence.uzi_score,
+        "uzi_coverage": evidence.uzi_coverage,
+        "uzi_state": evidence.uzi_state,
+        "source_dates": evidence.source_dates,
+        "source_paths": evidence.source_paths,
+        "reasons": evidence.reasons,
+    }
