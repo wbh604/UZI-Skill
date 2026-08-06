@@ -58,6 +58,20 @@ def test_parse_mx_roe_series_prefers_annual():
     assert parsed["roe"] == "32.5%"
 
 
+def test_parse_mx_roe_series_keeps_zero():
+    """Legitimate ROE 0 must not be dropped by truthiness checks."""
+    from fetch_financials import _parse_mx_roe_series
+
+    payload = _mx_table(
+        name_map={"roe": "净资产收益率ROE(加权)"},
+        heads=["2025年报", "2024年报", "2023年报"],
+        series={"roe": ["0", "12.5", "--"]},
+    )
+    parsed = _parse_mx_roe_series(payload)
+    assert parsed["roe_history"] == [12.5, 0.0]
+    assert parsed["financial_years"] == ["2024", "2025"]
+
+
 def test_fetch_roe_history_via_mx_uses_client(monkeypatch):
     from fetch_financials import _fetch_roe_history_via_mx
     import fetch_financials as ff
@@ -188,3 +202,114 @@ def test_financial_health_via_mx(monkeypatch):
     assert health["debt_ratio"] == 16.42
     assert health["roic"] == 28.31
     assert health["net_margin_pct"] == 49.58
+
+
+def test_financial_health_via_mx_keeps_zero(monkeypatch):
+    from fetch_financials import _fetch_financial_health_via_mx
+    import lib.mx_api as mx_mod
+
+    class _Client:
+        available = True
+
+        def __init__(self, *a, **k):
+            pass
+
+        def query(self, q):
+            return _mx_table(
+                name_map={
+                    "a": "流动比率",
+                    "b": "资产负债率",
+                    "c": "总资产净利率ROA",
+                    "d": "销售净利率",
+                },
+                heads=["2025年报"],
+                series={
+                    "a": ["0"],
+                    "b": ["--"],
+                    "c": ["0"],
+                    "d": ["12.5"],
+                },
+            )
+
+    monkeypatch.setattr(mx_mod, "MXClient", _Client)
+    health = _fetch_financial_health_via_mx("600519", "贵州茅台")
+    assert health["current_ratio"] == 0.0
+    assert health["roic"] == 0.0
+    assert health["net_margin_pct"] == 12.5
+    assert "debt_ratio" not in health
+
+
+def test_fetch_valuation_via_mx_source_basic_only(monkeypatch):
+    """MX unavailable · only basic fields · source must be basic (not basic+mx_api)."""
+    from fetch_valuation import _fetch_valuation_via_mx
+    import lib.mx_api as mx_mod
+
+    class _Client:
+        available = False
+
+        def __init__(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(mx_mod, "MXClient", _Client)
+    out = _fetch_valuation_via_mx("600519", "贵州茅台", {"pe_ttm": 20.58, "pb": 6.3})
+    assert out["_valuation_source"] == "basic"
+    assert out["pe"] == "20.58"
+    assert out["pb"] == "6.3"
+    assert "pe_quantile" not in out
+
+
+def test_fetch_valuation_via_mx_source_combo(monkeypatch):
+    from fetch_valuation import _fetch_valuation_via_mx
+    import lib.mx_api as mx_mod
+
+    class _Client:
+        available = True
+
+        def __init__(self, *a, **k):
+            pass
+
+        def fetch_snapshot(self, label):
+            return {}
+
+        def query(self, q):
+            if "市盈率" in q:
+                return _mx_table(
+                    name_map={"p": "5年市盈率历史百分位"},
+                    heads=["2026-07-30"],
+                    series={"p": ["33%"]},
+                )
+            return _mx_table(
+                name_map={"p": "5年市净率历史百分位"},
+                heads=["2026-07-30"],
+                series={"p": ["8%"]},
+            )
+
+    monkeypatch.setattr(mx_mod, "MXClient", _Client)
+    out = _fetch_valuation_via_mx("600519", "贵州茅台", {"pe_ttm": 20.58, "pb": 6.3})
+    assert out["_valuation_source"] == "basic+mx_api"
+    assert out["pe"] == "20.58"
+    assert "分位" in out["pe_quantile"]
+    assert out["pb_quantile"] == "8%"
+
+
+def test_fetch_valuation_via_mx_source_mx_only(monkeypatch):
+    from fetch_valuation import _fetch_valuation_via_mx
+    import lib.mx_api as mx_mod
+
+    class _Client:
+        available = True
+
+        def __init__(self, *a, **k):
+            pass
+
+        def fetch_snapshot(self, label):
+            return {"市盈率TTM": "15.2", "市净率": "2.1"}
+
+        def query(self, q):
+            return {"error": "empty"}
+
+    monkeypatch.setattr(mx_mod, "MXClient", _Client)
+    out = _fetch_valuation_via_mx("600519", "贵州茅台", {})
+    assert out["_valuation_source"] == "mx_api"
+    assert out["pe"] == "15.2"
+    assert out["pb"] == "2.1"

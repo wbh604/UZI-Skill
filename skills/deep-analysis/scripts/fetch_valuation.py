@@ -2,6 +2,8 @@
 
 补全：原方案要求 PE/PB/PEG/PS/EV/EBITDA + DCF + 历史分位 + 行业中枢
 """
+from __future__ import annotations
+
 import json
 import sys
 from typing import Any
@@ -145,6 +147,8 @@ def _fetch_valuation_via_mx(code: str, name_hint: str = "", basic: dict | None =
     label = (name_hint or "").strip() or code
     pe = basic.get("pe_ttm")
     pb = basic.get("pb")
+    used_basic = pe is not None or pb is not None
+    used_mx = False
     pe_q = None
     pe_window = "5 年"
     pb_q = None
@@ -158,6 +162,7 @@ def _fetch_valuation_via_mx(code: str, name_hint: str = "", basic: dict | None =
                     if "市盈率" in str(k) or "PE" in str(k).upper():
                         try:
                             pe = float(str(v).replace("%", "").replace("倍", ""))
+                            used_mx = True
                             break
                         except (TypeError, ValueError):
                             pass
@@ -166,6 +171,7 @@ def _fetch_valuation_via_mx(code: str, name_hint: str = "", basic: dict | None =
                     if "市净率" in str(k) or str(k).upper() == "PB":
                         try:
                             pb = float(str(v).replace("%", "").replace("倍", ""))
+                            used_mx = True
                             break
                         except (TypeError, ValueError):
                             pass
@@ -188,8 +194,17 @@ def _fetch_valuation_via_mx(code: str, name_hint: str = "", basic: dict | None =
                 client.query(f"{code} 市净率PB历史百分位"),
                 "市净率",
             )
+        if pe_q is not None or pb_q is not None:
+            used_mx = True
 
-    out: dict[str, Any] = {"_valuation_source": "basic+mx_api"}
+    if used_basic and used_mx:
+        source = "basic+mx_api"
+    elif used_mx:
+        source = "mx_api"
+    else:
+        source = "basic"
+
+    out: dict[str, Any] = {"_valuation_source": source}
     if pe is not None:
         out["pe"] = str(pe)
     if pb is not None:
@@ -223,10 +238,11 @@ def main_safe(ticker: str) -> dict:
         data.get(k) not in (None, "", "—")
         for k in ("pe", "pb", "pe_quantile", "pb_quantile")
     )
+    src = data.get("_valuation_source") or "basic"
     return {
         "ticker": ti.full,
         "data": data,
-        "source": "basic+mx_api (mini_racer-safe)",
+        "source": f"{src} (mini_racer-safe)",
         "fallback": not filled,
     }
 
@@ -384,7 +400,7 @@ def main(ticker: str) -> dict:
         "ticker": ti.full,
         "data": data,
         "source": "baidu:valuation + cninfo:industry_pe_ratio + simple_dcf"
-        + ("+mx_api" if data.get("_valuation_source") else ""),
+        + ("+mx_api" if "mx_api" in str(data.get("_valuation_source") or "") else ""),
         "fallback": False,
     }
 

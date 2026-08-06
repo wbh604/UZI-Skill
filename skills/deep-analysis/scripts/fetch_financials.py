@@ -38,6 +38,16 @@ def _to_float(v) -> float:
         return 0.0
 
 
+def _to_float_or_none(v) -> float | None:
+    """Parse numeric MX cells · preserve legitimate 0 · return None for missing."""
+    try:
+        if v in (None, "", "--", "-"):
+            return None
+        return float(str(v).replace(",", "").replace("%", ""))
+    except (ValueError, TypeError):
+        return None
+
+
 def _to_yi(v) -> float:
     """Convert raw (often 元) to 亿."""
     n = _to_float(v)
@@ -128,8 +138,8 @@ def _parse_mx_roe_series(result: dict) -> dict:
             import re
             m = re.search(r"(20\d{2})", head)
             year = m.group(1) if m else ""
-        val = _to_float(raw)
-        if year and val:
+        val = _to_float_or_none(raw)
+        if year and val is not None:
             pairs.append((year, round(val, 2)))
 
     if not pairs:
@@ -184,8 +194,8 @@ def _fetch_financial_health_via_mx(code: str, name_hint: str = "") -> dict:
             continue
         lab = str(name_map.get(key) or name_map.get(str(key)) or key)
         raw = values[idx] if idx < len(values) else values[0]
-        num = _to_float(raw)
-        if not num:
+        num = _to_float_or_none(raw)
+        if num is None:
             continue
         if "流动比率" in lab:
             health["current_ratio"] = num
