@@ -35,8 +35,8 @@ INVESTORS = [
     {"id": "druck",     "name": "德鲁肯米勒", "en": "Stanley Druckenmiller","group": "C", "fields": ["3_macro", "12_capital_flow"], "source": "Lost Tree Club Speech 2015", "avatar_seed": "Druckenmiller-Bald"},
     {"id": "robertson", "name": "罗伯逊",     "en": "Julian Robertson",   "group": "C", "fields": ["4_peers", "1_financials"], "source": "Tiger Management Letters", "avatar_seed": "Robertson-Tiger"},
     # v3.7.0 · 2 位做空猎手 (做空也是宏观判断 · 不另建派)
-    {"id": "burry",     "name": "迈克尔·伯利", "en": "Michael Burry",     "group": "C", "tier": "new_gen", "fields": ["3_macro", "10_valuation", "17_sentiment", "18_trap"], "source": "Scion Asset Management 13F + X @michaeljburry", "avatar_seed": "Burry-Plaid"},
-    {"id": "chanos",    "name": "吉姆·查诺斯", "en": "Jim Chanos",        "group": "C", "tier": "new_gen", "fields": ["11_governance", "1_financials", "18_trap"], "source": "Kynikos · 30 Years of Short Selling", "avatar_seed": "Chanos-Suit"},
+    {"id": "burry",     "name": "迈克尔·伯利", "en": "Michael Burry",     "group": "C", "mandate": "short", "tier": "new_gen", "fields": ["3_macro", "10_valuation", "17_sentiment", "18_trap"], "source": "Scion Asset Management 13F + X @michaeljburry", "avatar_seed": "Burry-Plaid"},
+    {"id": "chanos",    "name": "吉姆·查诺斯", "en": "Jim Chanos",        "group": "C", "mandate": "short", "tier": "new_gen", "fields": ["11_governance", "1_financials", "18_trap"], "source": "Kynikos · 30 Years of Short Selling", "avatar_seed": "Chanos-Suit"},
 
     # ──────────── D: 技术趋势派 ────────────
     {"id": "livermore", "name": "利弗莫尔",   "en": "Jesse Livermore",    "group": "D", "fields": ["2_kline", "15_events"], "source": "Reminiscences of a Stock Operator (1923)", "avatar_seed": "Livermore-Hat"},

@@ -19,6 +19,8 @@ Output schema:
 """
 from __future__ import annotations
 
+from lib.investor_db import by_id  # v2.15.6 · 做空派 mandate 查询
+
 import os
 from typing import Any
 
@@ -379,9 +381,17 @@ def panel_summary(results: dict[str, dict]) -> dict:
     if not results:
         return {"bullish": 0, "bearish": 0, "neutral": 0, "skip": 0, "avg_score": 50.0}
 
-    # Split active vs skipped
-    active = {k: v for k, v in results.items() if v["signal"] != "skip"}
-    skipped = {k: v for k, v in results.items() if v["signal"] == "skip"}
+    # v2.15.6 · 做空派(burry/chanos)的 bullish="无做空逻辑" 不等同 long 派买入 ·
+    # 拆成 long-book（不含做空派）与 short_consensus 两块
+    def _mandate(k):
+        inv = by_id(k)
+        return inv.get("mandate", "long") if inv else "long"
+
+    long_results = {k: v for k, v in results.items() if _mandate(k) != "short"}
+    short_results = {k: v for k, v in results.items() if _mandate(k) == "short"}
+
+    active = {k: v for k, v in long_results.items() if v["signal"] != "skip"}
+    skipped = {k: v for k, v in long_results.items() if v["signal"] == "skip"}
 
     bullish = sum(1 for r in active.values() if r["signal"] == "bullish")
     bearish = sum(1 for r in active.values() if r["signal"] == "bearish")
@@ -396,6 +406,25 @@ def panel_summary(results: dict[str, dict]) -> dict:
     sorted_bear = sorted(active.items(), key=lambda kv: kv[1]["score"])[:5]
 
     n_active = len(active)
+
+    # 做空派独立共识
+    short_active = {k: v for k, v in short_results.items() if v["signal"] != "skip"}
+    short_skip = {k: v for k, v in short_results.items() if v["signal"] == "skip"}
+    short_candidates = sum(1 for r in short_active.values() if r["signal"] == "bearish")
+    short_no_thesis = sum(1 for r in short_active.values() if r["signal"] in ("bullish", "neutral"))
+    short_scores = [r["score"] for r in short_active.values()]
+    short_consensus = {
+        "total": len(short_results),
+        "active": len(short_active),
+        "skip": len(short_skip),
+        "short_candidates": short_candidates,
+        "no_short_thesis": short_no_thesis,
+        "avg_score": round(sum(short_scores) / len(short_scores), 1) if short_scores else 50.0,
+        "top_short_candidates": [
+            {"id": k, "score": v["score"], "headline": v["headline"]}
+            for k, v in sorted(short_active.items(), key=lambda kv: kv[1]["score"])[:5]
+        ],
+    }
     return {
         "total": len(results),
         "active": n_active,
@@ -410,6 +439,8 @@ def panel_summary(results: dict[str, dict]) -> dict:
         "bearish_pct": round(bearish / n_active * 100, 0) if n_active else 0,
         "top_bulls": [{"id": k, "score": v["score"], "headline": v["headline"]} for k, v in sorted_bull],
         "top_bears": [{"id": k, "score": v["score"], "headline": v["headline"]} for k, v in sorted_bear],
+        "long_active": n_active,
+        "short_consensus": short_consensus,
     }
 
 
