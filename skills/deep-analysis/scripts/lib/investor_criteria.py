@@ -584,7 +584,7 @@ def _youzi_base_rules(min_mcap=None, max_mcap=None, need_stage_2=True, need_lhb=
             "lhb_hot", "近 30 天龙虎榜有热度",
             3,
             check=lambda f: f.get("lhb_30d_count", 0) >= 1,
-            pass_msg=f"30 天上榜 {{lhb_30d_count:.0f}} 次",
+            pass_msg="30 天上榜 {lhb_30d_count:.0f} 次",
             fail_msg="近 30 天未上榜"
         ))
     if need_sector_leader:
@@ -592,7 +592,7 @@ def _youzi_base_rules(min_mcap=None, max_mcap=None, need_stage_2=True, need_lhb=
             "top_of_sector", "行业领先 (排名前 3)",
             2,
             check=lambda f: 0 < f.get("industry_rank", 99) <= 3,
-            pass_msg=f"行业第 {{industry_rank}}",
+            pass_msg="行业第 {industry_rank}",
             fail_msg="非行业龙头"
         ))
     # Common: sentiment hot
@@ -600,8 +600,8 @@ def _youzi_base_rules(min_mcap=None, max_mcap=None, need_stage_2=True, need_lhb=
         "sentiment_hot", "舆情热度 > 50",
         2,
         check=lambda f: f.get("sentiment_heat", 0) >= 50,
-        pass_msg=f"热度 {{sentiment_heat:.0f}}",
-        fail_msg=f"热度 {{sentiment_heat:.0f}} 不够"
+        pass_msg="热度 {sentiment_heat:.0f}",
+        fail_msg="热度 {sentiment_heat:.0f} 不够"
     ))
     return rules
 
@@ -786,7 +786,7 @@ NAVAL_RULES = [
          pass_msg="护城河 {moat_total:.0f}/40 · 来自 specific knowledge",
          fail_msg="护城河 {moat_total:.0f}/40 · 谁都能干"),
     Rule("long_holding_horizon", "适合 10 年+ 持有", 4,
-         check=lambda f: f.get("roe_5y_above_15", 0) >= 4 or f.get("roe", 0) >= 18,
+         check=lambda f: f.get("roe_5y_above_15", 0) >= 4 or f.get("roe_5y_avg", 0) >= 18,
          pass_msg="ROE 持续 · 长期复利的标的",
          fail_msg="ROE 不持续 · 短期生意"),
     Rule("not_zero_sum", "正和游戏", 3,
@@ -935,9 +935,9 @@ ASNESS_RULES = [
          pass_msg="PE {pe_ttm:.0f} + PB {pb:.1f} · 价值因子打分高",
          fail_msg="PE {pe_ttm:.0f} + PB {pb:.1f} · 价值因子打分低"),
     Rule("quality_factor", "质量因子: 高 ROE + 低杠杆", 4,
-         check=lambda f: f.get("roe", 0) > 12 and f.get("debt_ratio", 100) < 60,
-         pass_msg="ROE {roe:.1f}% + 负债 {debt_ratio:.0f}% · 质量因子打分高",
-         fail_msg="ROE {roe:.1f}% + 负债 {debt_ratio:.0f}% · 质量因子打分低"),
+         check=lambda f: f.get("roe_5y_avg", 0) > 12 and f.get("debt_ratio", 100) < 60,
+         pass_msg="ROE {roe_5y_avg:.1f}% + 负债 {debt_ratio:.0f}% · 质量因子打分高",
+         fail_msg="ROE {roe_5y_avg:.1f}% + 负债 {debt_ratio:.0f}% · 质量因子打分低"),
     Rule("momentum_factor", "动量因子: 6-12 月跑赢", 3,
          check=lambda f: f.get("ytd_return", 0) > 0 and f.get("price_above_ma200", False),
          pass_msg="YTD {ytd_return:.1f}% · MA200 之上 · 动量打分高",
