@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.env
+.cache
+data
+logs
+web-reports
+cache
+reports
+skills/deep-analysis/scripts/.cache
+skills/deep-analysis/scripts/reports
+.DS_Store
+.idea
+.vscode
