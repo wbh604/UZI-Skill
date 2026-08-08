@@ -98,9 +98,29 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
         # v3.0.0 · mini_racer fetcher 必须串行（V8 isolate 非 thread-safe · 跟 legacy 一致）
         legacy_mod = getattr(fetcher, "_legacy_module", "")
         if legacy_mod in _MINI_RACER_LEGACY_MODULES:
-            # v3.3.4 · issue #61 · UZI_DISABLE_MINI_RACER=1 时跳过这 3 个 fetcher
-            # 即使串行化 · macOS Python 3.12/3.13 仍可能 V8 SIGTRAP · 给用户 escape hatch
+            # v3.3.4 · issue #61 · UZI_DISABLE_MINI_RACER=1 时跳过危险 fetcher
+            # valuation 可走 basic+MX 安全路径 · industry/capital_flow 仍 empty
             if os.environ.get("UZI_DISABLE_MINI_RACER") == "1":
+                if dim_key == "10_valuation" or legacy_mod == "fetch_valuation":
+                    try:
+                        from fetch_valuation import main_safe
+                        safe = main_safe(ticker)
+                        data = (safe or {}).get("data") or {}
+                        from .schema import DimResult, Quality
+                        filled = any(
+                            data.get(k) not in (None, "", "—")
+                            for k in ("pe", "pb", "pe_quantile", "pb_quantile")
+                        )
+                        dr = DimResult(
+                            dim_key=dim_key,
+                            data=data,
+                            quality=Quality.PARTIAL if filled else Quality.MISSING,
+                            source=(safe or {}).get("source") or "main_safe",
+                            error=(safe or {}).get("error"),
+                        )
+                        return dim_key, dr.to_dict(), dr.top_level_fields
+                    except Exception as e:
+                        return dim_key, DimResult.error_result(dim_key, f"main_safe: {e}").to_dict(), {}
                 return dim_key, DimResult.empty(dim_key).to_dict(), {}
             with _MINI_RACER_LOCK:
                 result = fetcher.fetch(ticker)

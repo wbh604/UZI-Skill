@@ -130,6 +130,19 @@ def _disarm_mini_racer_sentinel() -> None:
 def run_fetcher(module_name: str, args: tuple) -> dict:
     # v3.3.4 · issue #61 · 多重保护 mini_racer 崩溃
     if module_name in _MINI_RACER_FETCHERS and _mini_racer_disabled():
+        # valuation 可用 basic+MX 安全路径 · 不必整维跳空（否则 pe/分位 coverage 永久缺口）
+        if module_name == "fetch_valuation":
+            try:
+                from fetch_valuation import main_safe
+                result = main_safe(*args)
+                return result if isinstance(result, dict) else {"data": result}
+            except Exception as e:
+                return {
+                    "data": {"_disabled": "mini_racer skipped; main_safe failed"},
+                    "source": "fetch_valuation (safe-fallback-error)",
+                    "fallback": True,
+                    "error": f"{type(e).__name__}: {e}",
+                }
         return {
             "data": {"_disabled": "mini_racer skipped (env / sentinel)"},
             "source": f"{module_name} (skipped)",

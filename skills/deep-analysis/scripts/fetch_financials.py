@@ -39,10 +39,174 @@ def _to_float(v) -> float:
         return 0.0
 
 
+def _to_float_or_none(v) -> float | None:
+    """Parse numeric MX cells · preserve legitimate 0 · return None for missing."""
+    try:
+        if v in (None, "", "--", "-"):
+            return None
+        return float(str(v).replace(",", "").replace("%", ""))
+    except (ValueError, TypeError):
+        return None
+
+
 def _to_yi(v) -> float:
     """Convert raw (often 元) to 亿."""
     n = _to_float(v)
     return round(n / 1e8, 2)
+
+
+def _fetch_roe_history_via_mx(code: str, name_hint: str = "") -> dict:
+    """Pull annual weighted ROE series from 东财妙想 when sina indicator fails.
+
+    Returns {"roe_history": [...], "financial_years": [...], "roe": "xx.x%"} or {}.
+    Prefers 年报 rows; drops 一季报/季报 so coverage critical field stays annual-shaped.
+    """
+    try:
+        from lib.mx_api import MXClient
+    except Exception:
+        return {}
+    client = MXClient()
+    if not client.available:
+        return {}
+
+    label = (name_hint or "").strip() or code
+    queries = [
+        f"{label} 近五年加权净资产收益率",
+        f"{code} 近五年加权净资产收益率ROE",
+        f"{code} 历年年报净资产收益率ROE(加权)",
+    ]
+    for q in queries:
+        try:
+            result = client.query(q)
+        except Exception:
+            continue
+        parsed = _parse_mx_roe_series(result)
+        if parsed.get("roe_history"):
+            parsed["_mx_roe_query"] = q
+            return parsed
+    return {}
+
+
+def _parse_mx_roe_series(result: dict) -> dict:
+    """Extract oldest→newest annual ROE% list from an MX SEARCH_DATA payload."""
+    if not isinstance(result, dict) or result.get("error"):
+        return {}
+    data = result.get("data") or {}
+    inner = data.get("data") if isinstance(data.get("data"), dict) else data
+    sr = (inner or {}).get("searchDataResultDTO") or {}
+    dto_list = sr.get("dataTableDTOList") or []
+    if not dto_list:
+        return {}
+
+    dto = dto_list[0] if isinstance(dto_list[0], dict) else {}
+    table = dto.get("rawTable") or dto.get("table") or {}
+    if not isinstance(table, dict):
+        return {}
+    heads = table.get("headName") or []
+    name_map = dto.get("nameMap") or {}
+    if isinstance(name_map, list):
+        name_map = {str(i): v for i, v in enumerate(name_map)}
+
+    series_key = None
+    for key, values in table.items():
+        if key == "headName":
+            continue
+        label = str(name_map.get(key) or name_map.get(str(key)) or key)
+        if "ROE" in label.upper() or "净资产收益率" in label:
+            series_key = key
+            break
+    if series_key is None:
+        # fallback: first non-head numeric list
+        for key, values in table.items():
+            if key != "headName" and isinstance(values, list) and values:
+                series_key = key
+                break
+    if series_key is None:
+        return {}
+
+    values = table.get(series_key) or []
+    pairs: list[tuple[str, float]] = []
+    for i, raw in enumerate(values):
+        head = str(heads[i]) if i < len(heads) else ""
+        # keep 年报 only · skip 一季报/中报/三季报
+        if head and ("季" in head or "中报" in head):
+            continue
+        year = ""
+        for token in (head[:4],):
+            if token.isdigit():
+                year = token
+        if not year and head:
+            import re
+            m = re.search(r"(20\d{2})", head)
+            year = m.group(1) if m else ""
+        val = _to_float_or_none(raw)
+        if year and val is not None:
+            pairs.append((year, round(val, 2)))
+
+    if not pairs:
+        return {}
+    # de-dup by year keeping last, then oldest→newest
+    by_year: dict[str, float] = {}
+    for y, v in pairs:
+        by_year[y] = v
+    years = sorted(by_year.keys())[-6:]
+    hist = [by_year[y] for y in years]
+    return {
+        "roe_history": hist,
+        "financial_years": years,
+        "roe": f"{hist[-1]:.1f}%",
+    }
+
+
+def _fetch_financial_health_via_mx(code: str, name_hint: str = "") -> dict:
+    """Pull current_ratio / debt_ratio / roic / net_margin_pct from MX when sina fails."""
+    try:
+        from lib.mx_api import MXClient
+    except Exception:
+        return {}
+    client = MXClient()
+    if not client.available:
+        return {}
+    label = (name_hint or "").strip() or code
+    try:
+        result = client.query(f"{label} 流动比率 资产负债率 总资产净利率 销售净利率")
+    except Exception:
+        return {}
+    if not isinstance(result, dict) or result.get("error"):
+        return {}
+    data = result.get("data") or {}
+    inner = data.get("data") if isinstance(data.get("data"), dict) else data
+    sr = (inner or {}).get("searchDataResultDTO") or {}
+    dto_list = sr.get("dataTableDTOList") or []
+    if not dto_list or not isinstance(dto_list[0], dict):
+        return {}
+    dto = dto_list[0]
+    table = dto.get("table") or dto.get("rawTable") or {}
+    name_map = dto.get("nameMap") or {}
+    heads = [str(h) for h in (table.get("headName") or [])]
+    idx = 0
+    for i, h in enumerate(heads):
+        if "年报" in h and "季" not in h and "中报" not in h:
+            idx = i
+            break
+    health: dict = {}
+    for key, values in table.items():
+        if key == "headName" or not isinstance(values, list) or not values:
+            continue
+        lab = str(name_map.get(key) or name_map.get(str(key)) or key)
+        raw = values[idx] if idx < len(values) else values[0]
+        num = _to_float_or_none(raw)
+        if num is None:
+            continue
+        if "流动比率" in lab:
+            health["current_ratio"] = num
+        elif "资产负债率" in lab:
+            health["debt_ratio"] = num
+        elif "总资产净利率" in lab or "ROA" in lab:
+            health["roic"] = num
+        elif "销售净利率" in lab or ("净利率" in lab and "总资产" not in lab):
+            health["net_margin_pct"] = num
+    return health
 
 
 def _apply_operating_cash_flow(out: dict, df_cf) -> None:
@@ -194,6 +358,29 @@ def _fetch_a_share(ti) -> dict:
     except Exception as e:
         out["_indicator_error"] = str(e)
 
+    # ─── 2b. MX 兜底 ROE 历史（sina indicator SSL/墙常见）────────────
+    # coverage 公式把 roe_history 当 critical · sina 挂了就锁 67%。
+    # 东财妙想能稳定返回年报 ROE 序列 · 有 MX_APIKEY 时补齐。
+    if not out.get("roe_history"):
+        mx_roe = _fetch_roe_history_via_mx(code, getattr(ti, "raw", "") or "")
+        if mx_roe.get("roe_history"):
+            out["roe_history"] = mx_roe["roe_history"]
+            if mx_roe.get("financial_years") and not out.get("financial_years"):
+                out["financial_years"] = mx_roe["financial_years"]
+            if mx_roe.get("roe") and not out.get("roe"):
+                out["roe"] = mx_roe["roe"]
+            out["_roe_source"] = "mx_api"
+            out.pop("_indicator_error", None)  # 核心字段已补 · 不再把 sina 错当致命
+
+    # ─── 2c. MX 兜底 financial_health（coverage optional 字段）──
+    if not out.get("financial_health"):
+        mx_health = _fetch_financial_health_via_mx(code, ti.raw if hasattr(ti, "raw") else "")
+        if mx_health:
+            out["financial_health"] = mx_health
+            out["_financial_health_source"] = "mx_api"
+            if not out.get("net_margin") and mx_health.get("net_margin_pct") is not None:
+                out["net_margin"] = f"{mx_health['net_margin_pct']:.1f}%"
+
     # ─── 3. 营收增速 summary
     try:
         rh = out.get("revenue_history") or []
@@ -233,8 +420,7 @@ def _fetch_a_share(ti) -> dict:
         out["_dividend_error"] = str(e)
 
     # v3.4.2 · BaoStock 兜底（Schannel TLS / 网络受限场景）
-    # 当 akshare 链路全挂时（roe/net_margin/revenue_history 都空）· 用 baostock 季报数据补齐.
-    # 触发条件：核心字段缺失 + baostock 可用.
+    # 仅在核心三字段全空时启用（全量季报循环较慢）· roe_history 单缺走上面的 MX 兜底。
     needs_fallback = (
         not out.get("roe") and not out.get("revenue_history") and not out.get("net_margin")
     )
