@@ -9,12 +9,14 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 PERSONAS_DIR = Path(__file__).resolve().parent.parent.parent / "personas"
+PERSONAS_BUNDLE = Path(__file__).resolve().parent.parent.parent / "personas.json"
 
 
 @dataclass
@@ -133,36 +135,57 @@ def _parse_minimal_yaml(text: str) -> dict:
 def load_persona(investor_id: str) -> Persona | None:
     """根据 investor_id（如 'buffett' / 'zhao_lg'）读 YAML · 返 Persona 或 None."""
     path = PERSONAS_DIR / f"{investor_id}.yaml"
+    if not path.exists() and PERSONAS_BUNDLE.exists():
+        try:
+            bundled = json.loads(PERSONAS_BUNDLE.read_text(encoding="utf-8"))
+            d = bundled.get(investor_id) or {}
+            return _persona_from_dict(investor_id, d)
+        except Exception:
+            return None
     if not path.exists():
         return None
     try:
         text = path.read_text(encoding="utf-8")
         d = _parse_minimal_yaml(text)
-        is_stub = False
-        meta = d.get("_meta") or {}
-        if isinstance(meta, dict):
-            is_stub = meta.get("status") == "auto_generated_stub"
-        return Persona(
-            id=d.get("id", investor_id),
-            name=d.get("name", ""),
-            school=d.get("school", ""),
-            group=d.get("group", ""),
-            philosophy=d.get("philosophy", "") if isinstance(d.get("philosophy"), str) else "",
-            key_metrics=d.get("key_metrics", []) if isinstance(d.get("key_metrics"), list) else [],
-            avoids=d.get("avoids", []) if isinstance(d.get("avoids"), list) else [],
-            a_share_view=d.get("a_share_view", "") if isinstance(d.get("a_share_view"), str) else "",
-            voice=d.get("voice", "") if isinstance(d.get("voice"), str) else "",
-            famous_positions=d.get("famous_positions", []) if isinstance(d.get("famous_positions"), list) else [],
-            is_flagship=not is_stub,
-            raw=d,
-        )
+        return _persona_from_dict(investor_id, d)
     except Exception:
         return None
+
+
+def _persona_from_dict(investor_id: str, d: dict) -> Persona:
+    is_stub = False
+    meta = d.get("_meta") or {}
+    if isinstance(meta, dict):
+        is_stub = meta.get("status") == "auto_generated_stub"
+    return Persona(
+        id=d.get("id", investor_id),
+        name=d.get("name", ""),
+        school=d.get("school", ""),
+        group=d.get("group", ""),
+        philosophy=d.get("philosophy", "") if isinstance(d.get("philosophy"), str) else "",
+        key_metrics=d.get("key_metrics", []) if isinstance(d.get("key_metrics"), list) else [],
+        avoids=d.get("avoids", []) if isinstance(d.get("avoids"), list) else [],
+        a_share_view=d.get("a_share_view", "") if isinstance(d.get("a_share_view"), str) else "",
+        voice=d.get("voice", "") if isinstance(d.get("voice"), str) else "",
+        famous_positions=d.get("famous_positions", []) if isinstance(d.get("famous_positions"), list) else [],
+        is_flagship=not is_stub,
+        raw=d,
+    )
 
 
 def load_all_personas() -> dict[str, Persona]:
     """加载全部 51 persona · 返 {id: Persona}."""
     result = {}
+    if not PERSONAS_DIR.exists() and PERSONAS_BUNDLE.exists():
+        try:
+            bundled = json.loads(PERSONAS_BUNDLE.read_text(encoding="utf-8"))
+            for investor_id, d in bundled.items():
+                p = _persona_from_dict(investor_id, d)
+                if p and p.id:
+                    result[p.id] = p
+            return result
+        except Exception:
+            return {}
     for path in PERSONAS_DIR.glob("*.yaml"):
         p = load_persona(path.stem)
         if p and p.id:

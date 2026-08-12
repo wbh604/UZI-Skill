@@ -1,7 +1,7 @@
 ---
 name: deep-analysis
 description: 个股深度分析的核心工作流。当用户要求"深度分析 / 全面分析 / 帮我看看 / 值不值得买 / DCF / 机构建模 / 首次覆盖 / 投委会备忘录"等涉及个股研究的请求时触发。覆盖 A 股、港股、美股，产出 22 维数据 + 66 位大佬量化评审 + 6 种机构级估值建模 (DCF/Comps/LBO/3-Stmt/Merger) + 7 种研究产物 (首次覆盖/财报解读/催化剂日历/投资逻辑追踪/晨报/量化筛选/行业综述) + 6 种决策方法 (IC Memo/DD/Porter/单位经济/VCP/再平衡) + 杀猪盘检测，最终生成 Bloomberg 风格 HTML 报告 + 社交分享战报。关键词：股票、个股、深度分析、估值、DCF、comps、首次覆盖、IC memo、杀猪盘、龙虎榜、akshare。
-version: 3.9.4
+version: 3.9.8
 author: FloatFu-true
 license: MIT
 metadata:
@@ -24,7 +24,8 @@ metadata:
   2. **机构建模结果** (Task 1.5 · DCF/Comps/LBO/3-Stmt/IC Memo/Porter 等 22 种方法的计算输出)
   3. **65 人评委量化裁决** (Task 3 · 每人引用具体规则)
   4. **数据完整性报告** (哪些字段缺失 / 哪些降级)
-  5. **可审计的 methodology_log** (每一步计算的推导链)
+  5. **字段级数据质量标签** (`actual / derived / estimated / unavailable`，用于区分真实值、派生值、估算值和不可得字段)
+  6. **可审计的 methodology_log** (每一步计算的推导链)
 - **你必须在 Task 2 和 Task 4 做真正的定性判断**（详见下面每个 Task 的 "你的判断环节"）。
 
 ## ⛔ 硬性门控规则（违反即停止）

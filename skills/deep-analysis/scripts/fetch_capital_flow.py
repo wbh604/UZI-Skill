@@ -17,6 +17,7 @@ import sys
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
 from lib.cache import cached  # v2.15.3 · TTL cache
+from lib.data_quality import DataQuality, build_quality_report, mark_field
 from lib.market_router import parse_ticker
 
 
@@ -25,6 +26,12 @@ def _safe(fn, default):
         return fn()
     except Exception as e:
         return {"error": str(e)} if isinstance(default, dict) else default
+
+
+def _main_flow_quality(flow_list: list) -> dict:
+    if not flow_list:
+        return mark_field("unavailable", DataQuality.UNAVAILABLE, "akshare:stock_individual_fund_flow", "empty or source failed")
+    return mark_field("actual", DataQuality.ACTUAL, "akshare:stock_individual_fund_flow")
 
 
 # v2.15.3 · 大宗/解禁数据按年缓存（TTL 24h · 数据日频更新）
@@ -255,6 +262,25 @@ def main(ticker: str) -> dict:
         except Exception:
             return "—"
 
+    quality_fields = {
+        "northbound": mark_field(
+            _north_sum_20d(north),
+            DataQuality.ACTUAL if isinstance(north, dict) and north.get("flow_history") else DataQuality.UNAVAILABLE,
+            "akshare:northbound",
+        ),
+        "main_fund_flow_20d": _main_flow_quality(main_flow),
+        "margin_recent": mark_field(
+            len(margin),
+            DataQuality.ACTUAL if margin else DataQuality.UNAVAILABLE,
+            f"akshare:margin_detail_{exchange}",
+        ),
+        "holders_trend": mark_field(
+            _holders_trend(holders),
+            DataQuality.DERIVED if holders else DataQuality.UNAVAILABLE,
+            "akshare:stock_zh_a_gdhs",
+        ),
+    }
+
     return {
         "ticker": ti.full,
         "data": {
@@ -271,6 +297,8 @@ def main(ticker: str) -> dict:
             "unlock_recent": unlock,
             "unlock_schedule": unlock_schedule,
             "institutional_history": inst_history,
+            "quality_fields": quality_fields,
+            "data_quality": build_quality_report(quality_fields),
         },
         "source": "akshare:multi (north + margin + gdhs + fund_flow + dzjy + restricted_release + fund_hold_detail)",
         "fallback": False,

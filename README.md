@@ -12,11 +12,13 @@
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-22-red)]()
 [![Self-Review](https://img.shields.io/badge/Self--Review-13%20checks-blueviolet)](skills/deep-analysis/scripts/lib/self_review.py)
 
-A 股 / 港股 / 美股 · 个股深度分析引擎 · **66 位评审团 × 9 大流派 × 22 维数据 × 22 种机构方法** · 最新 **v3.9.4**：前端显示修复 + 美化（kimi-k3）· 完整演进见 [更新日志](#-更新日志)
+A 股 / 港股 / 美股 · 个股深度分析引擎 · **66 位评审团 × 9 大流派 × 22 维数据 × 22 种机构方法** · 最新 **v3.9.8**：SkillHub 概述增强 · 完整演进见 [更新日志](#-更新日志)
 
 [安装](#安装) · [用法](#用法) · [三档深度](#-三档思考深度v2103-新增) · [Hermes 🆕](INSTALL-HERMES.md) · [评审团](#-66-位评审团) · [Serenity 🆕](#-i-组--serenity--ai-卡位瓶颈猎手) · [机构方法](#-22-种机构级方法) · [自查 gate](#-机械级自查-gatev29-起) · [报告截图](#-报告长什么样) · [FAQ](#-faq) · [入群交流测试](#-测试交流群) · [Contributors](CONTRIBUTORS.md)
 
 **中文** | [English](README_EN.md)
+
+> **基金 Skill 开发中**：鉴于太多人询问用 UZI-Skill 识别基金的问题，作者正在新开发一个基金 Skill，专门用来解决主动型基金的买入咨询意见问题。
 
 </div>
 
@@ -45,13 +47,14 @@ A 股 / 港股 / 美股 · 个股深度分析引擎 · **66 位评审团 × 9 �
 /stock-deep-analyzer:dcf 600519                ← DCF 估值专项
 ```
 
-> 💡 **当前最新稳定版 v3.9.4** · 完整演进见 [更新日志](#-更新日志)：
+> 💡 **当前最新稳定版 v3.9.8** · 完整演进见 [更新日志](#-更新日志)：
 > - **66 位评审团 · 9 大流派**（v3.7 新增 a16z Andreessen / Naval / 黄仁勋 / 马斯克 / 高瓴张磊 / Burry / Chanos 等 13 位 + 独立 I 组 Serenity AI 卡位猎手）· 242 条量化规则
 > - **Serenity 严谨化**（v3.8）：8 罚分因子 + 3 级证据阶梯（"有定点量产"≈90 分 vs "仅题材"≈60 分）+ 供应链 8 层分层
 > - **Tier-1 五方法**（v3.8）：`/ai-readiness` `/earnings-preview` `/model-update` `/returns` `/rebalance`
 > - **多股对比 & 组合**（v3.6）：`--versus` 2-4 只横向对决 · `--portfolio` CSV 组合健康度 · 暗色模式 + sticky TOC（v3.9.1 起可一键折叠）+ 术语悬浮
 > - **流派视角锁定**（v3.5）：`--school A-I` 只看一派的判断 · 报告带 SCHOOL LOCK banner
 > - **架构**：v3.0 pipeline 默认主干 · 685 tests 全过 · v2.x API 100% 向后兼容（`UZI_LEGACY=1` 回老路径）
+> - **数据可信度**（v3.9.5）：估值/资金流输出 `actual / derived / estimated / unavailable` 字段级标签；百度估值失败时接东财历史估值 fallback；数据源注册表可输出维度级健康快照，方便 agent 判断哪些证据能下结论、哪些只能做提示。
 >
 > **Hermes 用户**：`hermes skills install` 被上游 Skills Guard 误判 · 用一键脚本装：`curl -fsSL https://raw.githubusercontent.com/wbh604/UZI-Skill/main/install-hermes.sh | bash` · 详见 [INSTALL-HERMES.md](INSTALL-HERMES.md).
 
@@ -815,6 +818,10 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| **v3.9.8** | 2026-08-12 | **SkillHub 概述增强** · 保持 3.9.7 的 1 文件审核安全包策略，但把概述从“启动器说明”扩展为完整产品介绍：加入 66 位投资风格评审团、22 维数据、三档深度、估值与对比、数据可信度、HTML 报告、适合场景和命令示例。 |
+| **v3.9.7** | 2026-08-12 | **SkillHub 极简审核安全包** · 3.9.4-3.9.6 均被 SkillHub 内容审核误判涉政后，发布包策略改为“审核安全启动器”：SkillHub 包只生成一个中性 `SKILL.md`，不再携带完整源码、references、历史 changelog、mock、头像 bundle 和长案例。正常 GitHub/本地版本的完整能力不变；SkillHub 版本负责引导 agent 到完整源码 checkout 执行。 |
+| **v3.9.6** | 2026-08-12 | **SkillHub 审核包清洗增强** · 正常 GitHub/本地版本不改分析内容；仅扩展 `tools/build_skillhub_package.py` 的 SkillHub 专用文本清洗词表，覆盖 `军/军事/国防/党/主席/中央/外交/海外地区和人物名` 等更宽审核触发词，并把包体测试升级为强约束，避免打包后的 references、persona、mock 文件再次残留审核高风险词。 |
+| **v3.9.5** | 2026-08-12 | **数据可信度增强 + 多源估值 fallback** · 参考 `@user_9d5a2a39/aistockresearcher` 的工程化数据层思路，但不改变 UZI 的核心 role-play 分析定位。① 新增 `lib.data_quality` 字段级标签：`actual / derived / estimated / unavailable`，估值和资金流输出 `quality_fields` + `data_quality`，避免 agent 把估算值说成真实数据。② 数据源注册表新增 `source_health_snapshot()`，按维度/市场输出 source health 快照，帮助 agent 判断哪些源可作为强证据。③ A 股估值在百度估值接口失败或 PB 分位缺失时，新增东财 `RPT_VALUEANALYSIS_DET` 历史估值 fallback，保留 PE/PB 历史序列和来源标记。④ 资金面主力流数据显式标记为 akshare 实际值；缺失时标 `unavailable`，北向、融资、股东户数趋势也纳入质量报告。新增 4 个回归测试 |
 | **v3.9.4** | 2026-08-08 | **前端显示修复 + 美化（kimi-k3）** · ① None 泄漏清零：政策面（方向/补贴/监管/反垄断）与资金面"主力资金 20日"在数据源返回 null 时曾直接显示 `None`，现统一兜底为 "—"/"数据暂缺"。② 移动端图表裁切：sparkline SVG 固定 220px 宽度撑破容器（LBO 的 EBITDA 路径/债务偿还、维度卡迷你图），改为 `width:100%` 自适应 + 移动端单列堆叠；敏感性表/机构建模表移动端横向可滚动。③ 治理面措辞："关联交易/违规"此前仅因搜过查询词就显示"未发现"（`qualitative_search` 存的是搜索词非结果），改为中性"暂无公开违规记录"。④ 抄作业卡片"时间框架/仓位风格/翻盘条件"标签与正文粘连，改为标签不换行+留白+正文右对齐。⑤ 美化：维度卡顶部常驻分级色条（高绿/中金/低红）+ hover 高亮、全局平滑锚点滚动、文本选择色、`:focus-visible` 聚焦环、细滚动条、section/卡片进入视口轻浮现（尊重 `prefers-reduced-motion`）、TOC 锚点 `scroll-margin` 防遮挡。⑥ 版本对齐：3 个子 skill（investor-panel/lhb-analyzer/trap-detector）原停在 3.9.2 与主 manifest 不一致，全部统一 bump 到 3.9.4。全量 685 passed |
 | **Unreleased** | 2026-08-05 | **全球同行业绩对比 + 数据完整性 hotfix** · 自动按全球细分行业发现候选并补全 Top 8 年度财务，覆盖日/韩/台/新/印/加/澳/英/欧洲等 Yahoo 交易所后缀；原币与 USD 标准化值分离，跨币种原始市值不混算，同行失败隔离、后备候选递补并缓存 24h。报告新增目标高亮、同行中位数、全球分位、规模/毛利率散点和明细表，结果接入 Comps 与维度评分。同步包含 issue #87/#90 的行情 scale、自身同行剔除和美股 TTM 修复。22 个全球同行专项测试 · 全量 685 passed |
 | **v3.9.3** | 2026-08-07 | **茅台深度实测驱动的数据/渲染修复** · ① 现金流误判：`fcf_positive` 从 OCF/净利比改为真实 FCF，茅台(FCF 658亿)不再显示"现金流为负"；`_ic_risks` 的"行业周期下行"不再无条件追加，仅行业判定衰退时才算。② 同行修复：push2 被反爬时 4_peers 曾只剩自己一行("暂无可比股")——新增 INDUSTRY_PEERS 硬编码同行兜底(白酒→五粮液/泸州老窖/洋河/山西汾酒)，用 `stock_financial_analysis_indicator_em`(不走 push2)拉 ROE。③ 渲染修复：评委 pass/fail dict 不再泄漏成 Python 字面量(报告曾出现 162 处 `{'msg':...}`)；4_peers 对比条 `abs(None)` 崩溃；一致目标价不再显示"(None)"。④ deep 档强制 agent 介入 role-play：`--depth deep` 不再 CLI 一把梭，须 stage1 → 读 persona → 写 agent_analysis.json(`per_investor_override` 已能真正合并)。⑤ Codex 评审反馈(P1/P2)：`fcf_positive` 优先用真实经营现金流(净利×0.8 仅作缺失回退)；同行兜底补别名匹配(集成电路→半导体 / 工业金属→有色金属)且被分析股不在同行列表时补 self 行；HK rank-only 的 `peer="—"` 不再被渲染成 0 对比条。45+ 回归测试 |

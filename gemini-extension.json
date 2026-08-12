@@ -1,6 +1,6 @@
 {
   "name": "stock-deep-analyzer",
-  "version": "3.9.4",
+  "version": "3.9.8",
   "description": "A股/港股/美股个股深度分析 · 22维数据 × 66位大佬评委 × 22种机构方法 · Bloomberg风格报告",
   "contextFileName": "GEMINI.md"
 }

@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import json
 import sys
+import urllib.request
 from typing import Any
 
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
+from lib.data_quality import DataQuality, build_quality_report, mark_field
+from lib.data_source_registry import source_health_snapshot
 from lib.market_router import parse_ticker
 
 
@@ -30,6 +33,56 @@ def _market_weighted_pe(df) -> float | None:
         if 0 < pe < 500:
             vals.append(pe)
     return round(sum(vals) / len(vals), 2) if vals else None
+
+
+def _safe_float(v: Any, default: float | None = None) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    return f if 0 < abs(f) < 1e15 else default
+
+
+def _http_get_json(url: str, headers: dict | None = None, timeout: int = 8) -> dict:
+    req = urllib.request.Request(url, headers=headers or {"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+
+def _downsample(values: list[float], max_points: int = 60) -> list[float]:
+    if len(values) <= max_points:
+        return values
+    step = max(1, len(values) // max_points)
+    return values[::step]
+
+
+def _percentile(current: Any, history: list[float]) -> float | None:
+    cur = _safe_float(current)
+    if cur is None or not history:
+        return None
+    valid = [v for v in history if v and v > 0]
+    if not valid:
+        return None
+    return sum(1 for v in sorted(valid) if v < cur) / len(valid) * 100
+
+
+def _fetch_eastmoney_valuation_history(code: str, history_len: int = 250) -> dict:
+    url = (
+        "https://datacenter-web.eastmoney.com/api/data/v1/get"
+        "?reportName=RPT_VALUEANALYSIS_DET&columns=ALL"
+        f"&filter=(SECURITY_CODE%3D%22{code}%22)"
+        f"&pageSize={history_len}&sortColumns=TRADE_DATE&sortTypes=-1"
+    )
+    data = _http_get_json(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"})
+    rows = sorted(((data.get("result") or {}).get("data") or []), key=lambda r: str(r.get("TRADE_DATE", "")))
+    pe_history = [v for v in (_safe_float(r.get("PE_TTM")) for r in rows) if v is not None]
+    pb_history = [v for v in (_safe_float(r.get("PB_MRQ")) for r in rows) if v is not None]
+    return {
+        "pe_history": pe_history,
+        "pb_history": pb_history,
+        "history_dates": [str(r.get("TRADE_DATE", ""))[:10] for r in rows],
+        "source": "eastmoney:RPT_VALUEANALYSIS_DET",
+    }
 
 
 def simple_dcf(
@@ -92,6 +145,8 @@ def main(ticker: str) -> dict:
     ti = parse_ticker(ticker)
     basic = ds.fetch_basic(ti)
     pe_history: list = []
+    pb_history: list = []
+    history_source = ""
     pe_quantile_val = None
     pb_quantile_val = None
     industry_pe_avg = None
@@ -126,6 +181,21 @@ def main(ticker: str) -> dict:
                     pb_quantile_val = sum(1 for x in sorted_pb if x < cur_pb) / len(sorted_pb) * 100
         except Exception:
             pass
+
+        if not pe_history or pb_quantile_val is None:
+            try:
+                em_hist = _fetch_eastmoney_valuation_history(ti.code)
+                if not pe_history and em_hist.get("pe_history"):
+                    pe_history = _downsample(em_hist["pe_history"])
+                    pe_quantile_val = _percentile(basic.get("pe_ttm") or (em_hist["pe_history"][-1] if em_hist["pe_history"] else None), em_hist["pe_history"])
+                    history_source = em_hist.get("source", "")
+                if em_hist.get("pb_history"):
+                    pb_history = _downsample(em_hist["pb_history"])
+                    if pb_quantile_val is None:
+                        pb_quantile_val = _percentile(basic.get("pb") or (em_hist["pb_history"][-1] if em_hist["pb_history"] else None), em_hist["pb_history"])
+                    history_source = history_source or em_hist.get("source", "")
+            except Exception:
+                pass
 
         # 2. 行业 PE 均值 - use cninfo (bypass push2)
         try:
@@ -217,6 +287,14 @@ def main(ticker: str) -> dict:
     cur_pe = basic.get("pe_ttm")
     iv_total = dcf_result.get("intrinsic_value_total") if isinstance(dcf_result, dict) else None
     dcf_display = f"¥{iv_total / 1e8:.1f}亿" if iv_total else "—"
+    quality_fields = {
+        "pe": mark_field(cur_pe, DataQuality.ACTUAL if cur_pe is not None else DataQuality.UNAVAILABLE, str(basic.get("source") or "basic")),
+        "pb": mark_field(basic.get("pb"), DataQuality.ACTUAL if basic.get("pb") is not None else DataQuality.UNAVAILABLE, str(basic.get("source") or "basic")),
+        "pe_quantile": mark_field(pe_quantile_val, DataQuality.DERIVED if pe_quantile_val is not None else DataQuality.UNAVAILABLE, history_source or "baidu:valuation"),
+        "pb_quantile": mark_field(pb_quantile_val, DataQuality.DERIVED if pb_quantile_val is not None else DataQuality.UNAVAILABLE, history_source or "baidu:valuation"),
+        "industry_pe": mark_field(industry_pe_avg, DataQuality.ACTUAL if industry_pe_avg else DataQuality.UNAVAILABLE, "cninfo/hk_valuation"),
+        "dcf": mark_field(iv_total, DataQuality.ESTIMATED if iv_total else DataQuality.UNAVAILABLE, "simple_dcf", "FCF proxy + fixed assumptions"),
+    }
 
     return {
         "ticker": ti.full,
@@ -229,8 +307,13 @@ def main(ticker: str) -> dict:
             "industry_pe_fallback_reason": industry_pe_fallback_reason,
             "dcf": dcf_display,
             "pe_history": pe_history,
+            "pb_history": pb_history,
+            "valuation_history_source": history_source or ("baidu:valuation" if pe_history else ""),
             "dcf_simple": dcf_result,
             "dcf_sensitivity": dcf_sensitivity,
+            "quality_fields": quality_fields,
+            "data_quality": build_quality_report(quality_fields),
+            "source_health": source_health_snapshot("10_valuation", ti.market),
         },
         "source": "baidu:valuation + cninfo:industry_pe_ratio + simple_dcf",
         "fallback": False,

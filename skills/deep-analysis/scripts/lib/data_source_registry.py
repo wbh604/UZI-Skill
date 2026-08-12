@@ -74,6 +74,14 @@ _TIER1: list[DataSource] = [
         "龙虎榜 / 北向 / 融资融券 / 股东户数 / 研报 / 行业板块成分（akshare board_industry_cons_em 走这里）"
     ),
     DataSource(
+        "em_valuation_history", "东方财富估值历史",
+        "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_VALUEANALYSIS_DET",
+        ("A",),
+        ("10_valuation",),
+        1, "http", "known_good",
+        "PE_TTM / PB_MRQ 历史序列；百度估值接口失败时用于真实历史分位 fallback"
+    ),
+    DataSource(
         "xq_api", "雪球 akshare backend",
         "https://stock.xueqiu.com/",
         ("A", "H"),
@@ -692,6 +700,28 @@ def http_sources_for(dim_key: str, market: str) -> list[DataSource]:
     health_rank = {"known_good": 0, "flaky": 1, "blocked_often": 2, "needs_browser": 3}
     hits = [s for s in SOURCES if s.tier == 1 and market in s.markets and dim_key in s.dims]
     return sorted(hits, key=lambda s: health_rank.get(s.health, 99))
+
+
+def source_health_snapshot(dim_key: str, market: str) -> dict:
+    """Return a compact health snapshot for agent/report diagnostics."""
+    health_rank = {"known_good": 0, "flaky": 1, "blocked_often": 2, "needs_browser": 3}
+    hits = [s for s in SOURCES if market in s.markets and dim_key in s.dims]
+    ordered = sorted(hits, key=lambda s: (health_rank.get(s.health, 99), s.tier, s.id))
+    counts: dict[str, int] = {}
+    sources = []
+    for source in ordered:
+        counts[source.health] = counts.get(source.health, 0) + 1
+        sources.append({
+            "id": source.id,
+            "name_cn": source.name_cn,
+            "tier": source.tier,
+            "access": source.access,
+            "health": source.health,
+            "base_url": source.base_url,
+            "notes": source.notes,
+        })
+    counts["total"] = len(sources)
+    return {"dim": dim_key, "market": market, "counts": counts, "sources": sources}
 
 
 def playwright_sources_for(dim_key: str, market: str) -> list[DataSource]:

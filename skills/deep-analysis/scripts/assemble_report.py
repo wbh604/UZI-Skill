@@ -6,6 +6,7 @@ Output: reports/{ticker}_{YYYYMMDD}/full-report.html
 from __future__ import annotations
 
 import json
+import base64
 import shutil
 import sys
 from datetime import datetime
@@ -18,6 +19,7 @@ from lib.cache import read_task_output, market_status  # noqa: E402
 ROOT = HERE.parent
 TEMPLATE = ROOT / "assets" / "report-template.html"
 AVATARS_DIR = ROOT / "assets" / "avatars"
+AVATARS_BUNDLE = ROOT / "assets" / "avatars-bundle.json"
 
 
 def _safe(v, default="—"):
@@ -603,7 +605,13 @@ def assemble(ticker: str) -> Path:
 
     out_avatars = out_dir / "avatars"
     if not out_avatars.exists():
-        shutil.copytree(AVATARS_DIR, out_avatars)
+        if AVATARS_DIR.exists():
+            shutil.copytree(AVATARS_DIR, out_avatars)
+        elif AVATARS_BUNDLE.exists():
+            out_avatars.mkdir(parents=True, exist_ok=True)
+            bundle = json.loads(AVATARS_BUNDLE.read_text(encoding="utf-8"))
+            for name, b64 in bundle.items():
+                (out_avatars / name).write_bytes(base64.b64decode(b64))
 
     one_liner = (
         f"{syn.get('name')} 体检结果：{int(syn.get('overall_score', 0))} 分，"

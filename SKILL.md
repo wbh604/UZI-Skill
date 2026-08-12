@@ -1,9 +1,13 @@
 ---
 name: uzi
+slug: uzi-skill
+displayName: UZI Skill
 description: A-share, Hong Kong, and US stock analysis skill for deep research, quick scans, investor panel review, hot-money/LHB analysis, trap detection, valuation, IC memos, and Bloomberg-style HTML reports.
-version: 3.9.4
+summary: 66 位投资评审团驱动的 A 股、港股、美股深度分析 Skill。
+version: 3.9.8
 author: FloatFu-true
 license: MIT
+homepage: https://github.com/wbh604/UZI-Skill
 metadata:
   tags: [finance, stocks, a-share, hong-kong, us-stocks, dcf, valuation, investor-panel, youzi, lhb, trap-detection]
   related_skills: [deep-analysis, investor-panel, lhb-analyzer, trap-detector]
@@ -53,4 +57,5 @@ python3 run.py <ticker> --school F --no-browser
 3. For serious deep-analysis requests, complete the agent review loop described in `skills/deep-analysis/SKILL.md` before final report assembly.
 4. For hot-money analysis, apply LHB seat matching and `is_in_range()` before making a short-term judgment.
 5. For trap detection, scan all eight signals and include concrete evidence when risk is non-trivial.
-6. For report template or UI changes, update tests, version metadata, and release notes together.
+6. Treat `data_quality` / `quality_fields` as the confidence boundary: actual, derived, estimated, and unavailable fields must not be narrated as the same kind of evidence.
+7. For report template or UI changes, update tests, version metadata, and release notes together.
