@@ -459,15 +459,15 @@ Every time a new BUG is fixed, a matching `check_*` rule is added to self_review
 
 Live count: ![GitHub Repo stars](https://img.shields.io/github/stars/wbh604/UZI-Skill?style=social)
 
-<a href="https://star-history.com/#wbh604/uzi-skill&Date">
+<a href="https://star-history.dera.page/#wbh604/uzi-skill&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=wbh604/uzi-skill&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=wbh604/uzi-skill&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=wbh604/uzi-skill&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=wbh604/uzi-skill&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=wbh604/uzi-skill&type=Date" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=wbh604/uzi-skill&type=Date" />
  </picture>
 </a>
 
-> Note: star-history.com caches server-side for 24h, so the chart may lag during fast-growth days. For the true current count, see the shields.io badge above — or click the chart to open the live star-history.com page (that triggers a backend refresh).
+> Note: star-history.dera.page caches server-side for 24h, so the chart may lag during fast-growth days. For the true current count, see the shields.io badge above, or click the chart to open the live star-history.dera.page page (that triggers a backend refresh).
 
 ---
 
