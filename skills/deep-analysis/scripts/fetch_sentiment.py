@@ -7,6 +7,7 @@ import sys
 from lib import data_sources as ds
 from lib.market_router import parse_ticker
 from lib.web_search import search
+from lib.xquik_sentiment import build_stock_query, fetch_x_sentiment
 
 
 def main(ticker: str) -> dict:
@@ -35,6 +36,11 @@ def main(ticker: str) -> dict:
         ]
         platform_hit[key] = len(valid)
 
+    xquik = fetch_x_sentiment(build_stock_query(ti.code, name, ti.market))
+    if xquik["status"] == "ok":
+        snippets["x"] = xquik["snippets"]
+        platform_hit["x"] = xquik["total_hits"]
+
     # Positive/negative sentiment analysis
     all_bodies = []
     for platform_snips in snippets.values():
@@ -42,8 +48,14 @@ def main(ticker: str) -> dict:
             all_bodies.append(s.get("body", ""))
     text = " ".join(all_bodies).lower()
 
-    positive_kws = ["看好", "强势", "上涨", "涨停", "突破", "利好", "龙头", "加仓", "买入"]
-    negative_kws = ["看空", "下跌", "亏损", "利空", "减仓", "卖出", "割肉", "杀跌"]
+    positive_kws = [
+        "看好", "强势", "上涨", "涨停", "突破", "利好", "龙头", "加仓", "买入",
+        "bullish", "outperform", "upside", "buy", "beat estimates",
+    ]
+    negative_kws = [
+        "看空", "下跌", "亏损", "利空", "减仓", "卖出", "割肉", "杀跌",
+        "bearish", "underperform", "downside", "sell", "miss estimates",
+    ]
     pos = sum(1 for kw in positive_kws if kw in text)
     neg = sum(1 for kw in negative_kws if kw in text)
     has_signal = (pos + neg) > 0
@@ -113,6 +125,8 @@ def main(ticker: str) -> dict:
             "platform_snippets": snippets,
             "platform_hits": platform_hit,
             "total_mentions": total_hits,
+            "xquik_status": xquik["status"],
+            "xquik_error_type": xquik.get("error_type"),
             # v2.12 · 社交热榜额外信号（散户情绪 · 补 ddgs 盲区）
             "hot_trend_mentions": hot_trend_mentions,
             "hot_trend_hit_count": hot_trend_mentions.get("total_hits", 0),
@@ -121,7 +135,12 @@ def main(ticker: str) -> dict:
             "news_sources_ok": news_multi.get("sources_ok", 0),
             "news_total_hits": news_multi.get("total_hits", 0),
         },
-        "source": "web_search:ddgs + hottrend (6 热榜) + news_providers (v2.13.7 · 4 新闻源)",
+        "source": " + ".join([
+            "web_search:ddgs",
+            "hottrend (6 热榜)",
+            "news_providers (v2.13.7 · 4 新闻源)",
+            *(["Xquik X search"] if xquik["status"] == "ok" else []),
+        ]),
         "fallback": False,
     }
 

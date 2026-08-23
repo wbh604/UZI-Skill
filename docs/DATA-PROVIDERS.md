@@ -76,6 +76,20 @@ export TUSHARE_TOKEN=your_token_here
 
 **限制**: 免费 120 积分够跑 50 次左右；常用接口需 2000+ 分（贡献数据 / 充值）
 
+### 🟡 `xquik_x_search` · X 舆情（可选）
+
+启用后，`17_sentiment` 会搜索公司名称和股票代码。返回的 X 帖子会进入热度与情绪计算。
+
+```bash
+pip install x_twitter_scraper
+export X_TWITTER_SCRAPER_API_KEY=your_key_here
+```
+
+实现使用公开的 [`x_twitter_scraper`](https://pypi.org/project/x-twitter-scraper/) Python SDK。
+已验证版本为 `0.11.2`。缺少 SDK、凭据或网络时，分析保持原结果。失败不会计为负面情绪。
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
+
 ## 未实现但国内能用的 Providers
 
 按 ROI 排，想加随时欢迎 PR：
@@ -160,7 +174,8 @@ export TUSHARE_TOKEN=xxx
 
 **含境外**（需代理）：
 ```bash
-pip install efinance tushare openbb
+pip install efinance tushare openbb x_twitter_scraper
 export TUSHARE_TOKEN=xxx
 export FMP_API_KEY=xxx
+export X_TWITTER_SCRAPER_API_KEY=xxx
 ```
