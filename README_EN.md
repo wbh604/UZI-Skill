@@ -333,7 +333,14 @@ If you don't enable, the dim transparently reports `"⚠️ XueQiu login require
 A: 5-8 minutes per stock. Most time is data fetching. Modeling itself is <1 second.
 
 **Q: Do I need paid data sources?**
-A: No. All free (akshare / yfinance / DuckDuckGo / CNInfo / HKEXNews / Eastmoney / XueQiu backend). Zero API keys required. Optional `MX_APIKEY` (mx妙想 API) for enhanced A-share indicators — it's free too.
+A: No. The default sources are free and require no API keys. Optional `MX_APIKEY` improves A-share indicators. Optional X/Twitter sentiment analysis requires `x_twitter_scraper` and `X_TWITTER_SCRAPER_API_KEY`. Missing X data never counts as bearish evidence.
+
+```bash
+pip install x_twitter_scraper
+export X_TWITTER_SCRAPER_API_KEY=your_key_here
+```
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
 
 **Q: Does it work for US / HK stocks?**
 A: Yes. `/stock-deep-analyzer:analyze-stock AAPL`, `/stock-deep-analyzer:analyze-stock BABA`, `/stock-deep-analyzer:analyze-stock 00700.HK`. HK now has 4-layer kline fallback (Eastmoney → Sina → yfinance → Yahoo Chart v8) since v2.13.7.

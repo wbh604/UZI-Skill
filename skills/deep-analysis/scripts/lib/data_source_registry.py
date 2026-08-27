@@ -82,6 +82,14 @@ _TIER1: list[DataSource] = [
         "akshare.stock_individual_basic_info_xq / stock_individual_spot_xq"
     ),
     DataSource(
+        "xquik_x_search", "Xquik X 搜索",
+        "https://xquik.com/api/v1/x/tweets/search",
+        GLOBAL_MARKETS,
+        ("17_sentiment",),
+        1, "http", "known_good",
+        "可选 · 需 x_twitter_scraper SDK 与 X_TWITTER_SCRAPER_API_KEY；失败不计为负面情绪"
+    ),
+    DataSource(
         "tencent_qt", "腾讯行情 qt",
         "https://qt.gtimg.cn/",
         ("A", "H", "U"),

@@ -481,7 +481,7 @@ Bull ¥26.95 / Base ¥20.73 / Bear ¥14.51，每个情景有概率和假设。
 
 ## 🔧 数据源
 
-全部免费，零 API key：
+默认数据源免费，零 API key。X 舆情可按需启用：
 
 | 数据 | 主源 | 备用 |
 |---|---|---|
@@ -496,6 +496,7 @@ Bull ¥26.95 / Base ¥20.73 / Bear ¥14.51，每个情景有概率和假设。
 | 全球汇率 | Yahoo Chart FX | 原币值始终保留 |
 | 宏观 / 政策 / 舆情 / 杀猪盘 | DuckDuckGo web search | — |
 | **社交热榜**（v2.12 新增） | **微博 / 知乎 / 百度 / 抖音 / 头条 / B 站 · 各平台官方 JSON API** | 5min 文件缓存 · 单平台失败不影响其他 |
+| **X 舆情**（可选） | **Xquik Twitter search SDK** | 未配置时保持原有舆情结果 |
 
 多层 fallback 链 — 一个源挂了自动切下一个。
 
@@ -552,6 +553,18 @@ export UZI_GLOBAL_PEER_LIMIT=10
 ```
 
 > 致谢：本模块设计参考了 [run-bigpig/jcp](https://github.com/run-bigpig/jcp) (韭菜盘 AI) 的 `hottrend` 服务实现。
+
+### 可选：X / Twitter sentiment analysis
+
+安装公开 Python SDK 并设置 API key，`17_sentiment` 会加入 X 帖子证据：
+
+```bash
+pip install x_twitter_scraper
+export X_TWITTER_SCRAPER_API_KEY=your_key_here
+```
+
+UZI 只记录帖子正文、作者和链接。未配置、请求失败或零结果都不会计为负面情绪。
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
 
 ### 🔑 可选：东方财富妙想 Skills API（v2.3 新增）
 
