@@ -301,11 +301,130 @@ def fetch_basic(ti: TickerInfo) -> dict:
 
     TTL = 60s (real-time quote). Use STOCK_NO_CACHE=1 to bypass entirely.
     """
+    # Hxxxx 中证指数不能走股票行情接口；尤其是股票接口的“股息率(TTM)”
+    # 对指数通常为空，必须改用中证指数估值文件。
+    from .market_router import classify_security_type
+    if classify_security_type(ti.code) == "index":
+        return cached(ti.full, f"basic__{ti.code}", lambda: _fetch_basic_index(ti), ttl=TTL_REALTIME)
     if ti.market == "A":
         return cached(ti.full, f"basic__{ti.code}", lambda: _fetch_basic_a(ti), ttl=TTL_REALTIME)
     if ti.market == "H":
         return cached(ti.full, f"basic__{ti.code}", lambda: _fetch_basic_hk(ti), ttl=TTL_REALTIME)
     return cached(ti.full, f"basic__{ti.code}", lambda: _fetch_basic_us(ti), ttl=TTL_REALTIME)
+
+
+def _index_row_value(row: Any, *keys: str) -> Any:
+    """Read the first non-empty value from a pandas row without assuming dtype."""
+    for key in keys:
+        try:
+            value = row.get(key)
+        except AttributeError:
+            try:
+                value = row[key]
+            except (KeyError, IndexError, TypeError):
+                value = None
+        if value is not None and str(value).strip() not in ("", "-", "—", "nan", "NaT"):
+            return value
+    return None
+
+
+def _index_number(value: Any) -> float | None:
+    try:
+        if value is None or str(value).strip() in ("", "-", "—", "nan"):
+            return None
+        return float(str(value).replace(",", "").replace("%", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_basic_index(ti: TickerInfo) -> dict:
+    """Fetch an index snapshot and its dividend yield from China Index data.
+
+    The CSI endpoint publishes two dividend-yield variants. We retain both and
+    expose a generic ``dividend_yield`` only when one is positive; zero/empty
+    source values remain unavailable instead of being interpreted as 0%.
+    """
+    out: dict[str, Any] = {
+        "code": ti.full,
+        "market": "A",
+        "security_type": "index",
+        "industry": "指数",
+    }
+    errors: list[str] = []
+
+    # Primary source: the official CSI valuation workbook, which includes the
+    # two dividend-yield variants but is not part of stock quote snapshots.
+    if ak is not None:
+        try:
+            df = ak.stock_zh_index_value_csindex(symbol=ti.code)
+            if df is not None and not df.empty:
+                if "日期" in df.columns:
+                    df = df.sort_values("日期")
+                row = df.iloc[-1]
+                out["name"] = _index_row_value(row, "指数中文简称", "指数中文全称")
+                out["index_name"] = _index_row_value(row, "指数中文全称", "指数中文简称")
+                out["dividend_yield_1"] = _index_number(_index_row_value(row, "股息率1"))
+                out["dividend_yield_2"] = _index_number(_index_row_value(row, "股息率2"))
+                out["dividend_yield_as_of"] = _index_row_value(row, "日期")
+                # Do not label the two CSI variants as TTM without a source
+                # definition. Downstream consumers also understand this field.
+                yields = [v for v in (out.get("dividend_yield_1"), out.get("dividend_yield_2"))
+                          if isinstance(v, (int, float)) and v > 0]
+                if yields:
+                    out["dividend_yield"] = round(yields[0], 4)
+                    out["dividend_yield_status"] = "available"
+                    out["dividend_yield_source"] = "csindex:stock_zh_index_value_csindex"
+                else:
+                    out["dividend_yield_status"] = "unavailable"
+                    out["dividend_yield_note"] = "中证指数估值文件最近一日股息率字段为空或为0，不能据此认定为0%。"
+        except Exception as e:
+            errors.append(f"csindex: {type(e).__name__}: {str(e)[:120]}")
+
+    # Secondary source: index quote only supplies name/price; it is not used
+    # to fabricate a dividend yield.
+    if ak is not None and not out.get("price"):
+        try:
+            hist = ak.stock_zh_index_hist_csindex(symbol=ti.code)
+            if hist is not None and not hist.empty:
+                if "日期" in hist.columns:
+                    hist = hist.sort_values("日期")
+                row = hist.iloc[-1]
+                out["price"] = _index_number(_index_row_value(row, "收盘价", "收盘", "close"))
+                out["price_as_of"] = _index_row_value(row, "日期", "date")
+                out["_quote_source"] = "csindex:stock_zh_index_hist_csindex"
+        except Exception as e:
+            errors.append(f"index_hist:{type(e).__name__}: {str(e)[:80]}")
+
+    if ak is not None and not out.get("price"):
+        for symbol in ("中证系列指数", "沪深重要指数"):
+            try:
+                df = ak.stock_zh_index_spot_em(symbol=symbol)
+                if df is None or df.empty:
+                    continue
+                code_col = next((c for c in ("代码", "index_code", "指数代码") if c in df.columns), None)
+                if code_col:
+                    rows = df[df[code_col].astype(str).str.upper() == ti.code]
+                else:
+                    rows = df.iloc[0:0]
+                if rows.empty:
+                    continue
+                row = rows.iloc[0]
+                out["name"] = out.get("name") or _index_row_value(row, "名称", "指数名称")
+                out["price"] = _index_number(_index_row_value(row, "最新价", "收盘价", "价格"))
+                out["change_pct"] = _index_number(_index_row_value(row, "涨跌幅", "涨跌幅%"))
+                out["_quote_source"] = f"akshare:stock_zh_index_spot_em:{symbol}"
+                break
+            except Exception as e:
+                errors.append(f"index_quote:{symbol}: {type(e).__name__}: {str(e)[:80]}")
+
+    if not out.get("name"):
+        out["name"] = ti.code
+    if errors:
+        out["_index_source_errors"] = errors
+    if not out.get("dividend_yield_status"):
+        out["dividend_yield_status"] = "unavailable"
+        out["dividend_yield_note"] = "中证指数估值源不可用或未披露股息率，不能据此认定为0%。"
+    return out
 
 
 def _fetch_basic_a(ti: TickerInfo) -> dict:

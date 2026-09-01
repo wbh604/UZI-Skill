@@ -918,7 +918,12 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
       - narrative_override: {core_conclusion, risks, buy_zones}
       - agent_reviewed: True  (marks that agent has intervened)
     """
-    from compute_friendly import compute_scenarios, compute_exit_triggers
+    from compute_friendly import (
+        compute_scenarios,
+        compute_exit_triggers,
+        compute_next_day_bias,
+        compute_next_day_backtest,
+    )
     ag = agent_analysis or {}
 
     basic = (raw.get("dimensions", {}).get("0_basic") or {}).get("data") or {}
@@ -963,7 +968,7 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
             "roe_5y_avg": _ff(d_fin.get("roe_5y_avg")),
             "roe_5y_min": _ff(d_fin.get("roe_5y_min")),
             "revenue_growth_3y_cagr": _ff(d_fin.get("revenue_growth_3y_cagr")),
-            "dividend_yield": _ff(bd.get("dividend_yield_ttm")),
+            "dividend_yield": _ff(bd.get("dividend_yield_ttm") or bd.get("dividend_yield")),
         }
         style_label = detect_style(feat_for_style, raw)
         adj = apply_style_weights(panel.get("investors", []), dims_scored, style_label)
@@ -1163,6 +1168,8 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
     # Friendly layer
     scenarios = compute_scenarios(raw, dims_scored)
     exit_triggers = compute_exit_triggers(raw, dims_scored, {})
+    next_day_bias = compute_next_day_bias(raw, raw.get("dimensions", {}))
+    next_day_backtest = compute_next_day_backtest(raw, raw.get("dimensions", {}))
     similar_stocks = raw.get("similar_stocks", [])
 
     # Dashboard — core_conclusion: agent override > script
@@ -1283,6 +1290,8 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
         "friendly": {
             "scenarios": scenarios,
             "exit_triggers": exit_triggers,
+            "next_day_bias": next_day_bias,
+            "backtest": next_day_backtest,
             "similar_stocks": similar_stocks,
         },
         "fund_managers": raw.get("fund_managers", []),
@@ -1309,6 +1318,7 @@ def generate_synthesis(raw: dict, dims_scored: dict, panel: dict, agent_analysis
                 "stop": f"¥{round(price * 0.85, 2) if price else '—'}",
                 "target": f"¥{round(price * 1.25, 2) if price else '—'}",
             },
+            "next_day_bias": next_day_bias,
+            "backtest": next_day_backtest,
         },
     }
-

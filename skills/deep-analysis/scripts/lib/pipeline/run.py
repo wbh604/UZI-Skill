@@ -81,7 +81,9 @@ def _preflight_guards(ticker: str) -> None:
         ti = parse_ticker(ticker)
         if ti.market == "A":
             sec_type = classify_security_type(ti.code)
-            if sec_type in ("etf", "lof", "mutual_fund", "convertible_bond", "index"):
+            # CSI indexes (Hxxxxx) have a dedicated basic/valuation path and
+            # are allowed through; ETF/LOF/CB still use the legacy guidance.
+            if sec_type in ("etf", "lof", "mutual_fund", "convertible_bond"):
                 raise ValueError(
                     f"pipeline: {sec_type} 证券类型需 legacy 处理 · fallback"
                 )

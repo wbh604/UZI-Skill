@@ -2,6 +2,7 @@
 
 ### 内容
 - `render_friendly_layer(syn, raw)` · 一万块场景模拟 + exit triggers + 类似股票
+- `render_friendly_layer(syn, raw)` · 次日方向分 + 3 个月回测 + 场景模拟 + exit triggers + 类似股票
 - `render_fund_managers(managers)` · 基金经理抄作业（重点修复区 v2.15.1/v2.15.2）
 - `_render_fund_compact_row(m, rank)` · fund_managers 的紧凑行变体
 - `render_panel_insights(syn, panel)` · 评委汇总观点
@@ -36,13 +37,155 @@ def _safe(v, default="—"):
     return v
 
 
+def _render_next_day_bias_card(bias: dict) -> str:
+    """次日方向分卡片."""
+    if not bias:
+        return ""
+
+    direction = str(bias.get("direction", "中性"))
+    score = float(bias.get("score", 50))
+    short_score = float(bias.get("short_score", max(0, 100 - score)))
+    confidence = float(bias.get("confidence", 0))
+    summary = _safe(bias.get("summary"), "暂无次日方向分")
+    components = bias.get("components") or []
+    drivers = bias.get("drivers") or []
+    cautions = bias.get("cautions") or []
+
+    if direction == "看涨":
+        icon = "📈"
+        cls = "bullish"
+    elif direction == "看跌":
+        icon = "📉"
+        cls = "bearish"
+    else:
+        icon = "⚖️"
+        cls = "neutral"
+
+    comp_rows = ""
+    for comp in components[:4]:
+        delta = float(comp.get("score", 50)) - 50
+        sign = "+" if delta >= 0 else ""
+        comp_rows += (
+            f'<div class="bias-row">'
+            f'<span class="bias-name">{_safe(comp.get("name"), "—")}</span>'
+            f'<span class="bias-note">{_safe(comp.get("note"), "—")}</span>'
+            f'<strong class="bias-delta">{sign}{delta:.0f}</strong>'
+            f'</div>'
+        )
+
+    driver_html = ""
+    if drivers:
+        driver_html = '<div class="bias-list bullish">' + "".join(
+            f'<div class="bias-pill">{_safe(d)}</div>' for d in drivers[:3]
+        ) + "</div>"
+    caution_html = ""
+    if cautions:
+        caution_html = '<div class="bias-list bearish">' + "".join(
+            f'<div class="bias-pill">{_safe(d)}</div>' for d in cautions[:2]
+        ) + "</div>"
+
+    return f'''<div class="friendly-card bias {cls}">
+  <div class="fc-icon">{icon}</div>
+  <div class="fc-title">次日方向分</div>
+  <div class="fc-body">
+    <div class="bias-score"><span>{score:.0f}</span>/100 · {direction}</div>
+    <div class="bias-sub">看涨 {score:.0f} · 看跌 {short_score:.0f} · 置信度 {confidence:.0f}%</div>
+    <div class="bias-bar"><div style="width:{score:.0f}%"></div></div>
+    <div class="bias-summary">{_safe(summary)}</div>
+    <div class="bias-components">{comp_rows}</div>
+    {driver_html}
+    {caution_html}
+  </div>
+</div>'''
+
+
+def _render_backtest_card(backtest: dict) -> str:
+    """3 个月回测卡片."""
+    if not backtest:
+        return ""
+
+    best = backtest.get("best_threshold") or {}
+    latest = backtest.get("latest") or {}
+    thresholds = backtest.get("thresholds") or []
+    window_days = backtest.get("window_days", 0)
+    window_start = _safe(backtest.get("window_start"), "—")
+    window_end = _safe(backtest.get("window_end"), "—")
+    method = _safe(backtest.get("methodology"), "OHLCV-only backtest")
+
+    def _n_fmt(v):
+        try:
+            return f"{float(v):.1f}%"
+        except (TypeError, ValueError):
+            return "—"
+
+    summary_html = ""
+    if best:
+        summary_html = (
+            f'<div class="backtest-summary">'
+            f'<div><span>推荐 N</span><strong>{best.get("n", "—")}</strong></div>'
+            f'<div><span>买入次数</span><strong>{best.get("buy_count", "—")}</strong></div>'
+            f'<div><span>次日命中率</span><strong>{_n_fmt(best.get("next_day_hit_rate"))}</strong></div>'
+            f'<div><span>7日胜率</span><strong>{_n_fmt(best.get("week_win_rate"))}</strong></div>'
+            f'<div><span>7日平均收益</span><strong>{best.get("avg_week_return", "—"):+.2f}%</strong></div>'
+            f'</div>'
+        )
+
+    current_line = ""
+    if latest:
+        current_line = (
+            f'<div class="backtest-current">'
+            f'当前分数 <strong>{latest.get("score", 0):.1f}</strong> / 100 · '
+            f'阈值 N={latest.get("threshold", "—")} · '
+            f'{ "触发买入" if latest.get("buy_signal") else "未触发买入" }'
+            f'</div>'
+        )
+
+    rows = []
+    if best and thresholds:
+        target_n = best.get("n")
+        around = {target_n - 5, target_n, target_n + 5}
+        for item in thresholds:
+            if item.get("n") in around:
+                rows.append(
+                    f'<div class="backtest-row">'
+                    f'<span class="backtest-n">N={item.get("n", "—")}</span>'
+                    f'<span class="backtest-metric">买入 {item.get("buy_count", "—")} 次</span>'
+                    f'<span class="backtest-metric">次日 {item.get("next_day_hit_rate", 0):.1f}%</span>'
+                    f'<span class="backtest-metric">7日 {item.get("week_win_rate", 0):.1f}%</span>'
+                    f'<span class="backtest-metric">{item.get("avg_week_return", 0):+.2f}%</span>'
+                    f'</div>'
+                )
+
+    table_html = f'<div class="backtest-table">{"".join(rows)}</div>' if rows else ""
+    note_html = f'<div class="backtest-note">{method}</div>'
+
+    return f'''<div class="friendly-card backtest">
+  <div class="fc-icon">🧪</div>
+  <div class="fc-title">过去 3 个月回测</div>
+  <div class="fc-body">
+    <div class="backtest-window">{window_start} → {window_end} · {window_days} 个交易日</div>
+    {summary_html}
+    {current_line}
+    {table_html}
+    {note_html}
+  </div>
+</div>'''
+
+
 def render_friendly_layer(syn: dict, raw: dict) -> str:
-    """Three Tier-4 cards:
-    1. 一万块场景模拟 (worst/base/best case)
-    2. 最像的另外 3 只票 (可比)
-    3. 离场触发条件 (3-5 条)
+    """Four Tier-4 cards:
+    1. 次日方向分
+    2. 一万块场景模拟 (worst/base/best case)
+    3. 最像的另外 3 只票 (可比)
+    4. 离场触发条件 (3-5 条)
     """
     friendly = syn.get("friendly") or {}
+    next_day = friendly.get("next_day_bias") or {}
+    backtest = friendly.get("backtest") or {}
+
+    # ── Next-day direction score ──
+    next_day_card = _render_next_day_bias_card(next_day)
+    backtest_card = _render_backtest_card(backtest)
 
     # ── Scenario simulator ──
     scenarios = friendly.get("scenarios") or {}
@@ -102,7 +245,7 @@ def render_friendly_layer(syn: dict, raw: dict) -> str:
   </div>
 </div>'''
 
-    return scenario_card + similar_card + exit_card
+    return next_day_card + backtest_card + scenario_card + similar_card + exit_card
 
 
 ## ─── 基金经理抄作业面板 ───

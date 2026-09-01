@@ -746,6 +746,29 @@ def stage2(ticker: str) -> str:
     write_task_output(ti.full, "synthesis", syn)
     print(f"  综合评分: {syn['overall_score']}/100 · {syn['verdict_label']}")
     print(f"  agent_reviewed: {syn.get('agent_reviewed', False)}")
+    _bias = (syn.get("friendly") or {}).get("next_day_bias") or {}
+    if _bias:
+        print(
+            f"  次日方向分: {_bias.get('score', 0):.1f}/100 · "
+            f"{_bias.get('direction', '—')} · 置信度 {_bias.get('confidence', 0):.0f}%"
+        )
+    _backtest = (syn.get("friendly") or {}).get("backtest") or {}
+    _best = _backtest.get("best_threshold") or {}
+    _latest = _backtest.get("latest") or {}
+    if _best:
+        print(
+            f"  3 个月回测: N={_best.get('n', '—')} · "
+            f"命中率 {_best.get('next_day_hit_rate', 0):.1f}% · "
+            f"买入 {_best.get('buy_count', 0)} 次 · "
+            f"7日胜率 {_best.get('week_win_rate', 0):.1f}% · "
+            f"7日均值 {_best.get('avg_week_return', 0):+.2f}%"
+        )
+    if _latest:
+        print(
+            f"  当前信号: {_latest.get('score', 0):.1f}/100 · "
+            f"{'触发买入' if _latest.get('buy_signal') else '未触发买入'} · "
+            f"阈值 N={_latest.get('threshold', '—')}"
+        )
 
     print(f"\n📄 Task 5 · 报告组装")
     from assemble_report import assemble

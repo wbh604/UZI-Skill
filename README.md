@@ -3,6 +3,52 @@
 # 游资（UZI）Skills
 
 *"66 个投资大佬帮你看盘，巴菲特、赵老哥和股海贼王终于坐在了同一张桌子上。"*
+##预测QQQ第二天走势
+
+python3 run.py QQQ \
+  --qqq-research \
+  --research-underlying-only \
+  --research-direction-panel \
+  --research-output-dir "$PWD/skills/deep-analysis/scripts/reports/QQQ_direction" \
+  --research-output-dated
+
+##预测SPY第二天走势
+python3 run.py SPY \
+  --qqq-research \
+  --research-underlying-only \
+  --research-direction-panel \
+  --research-output-dir "$PWD/skills/deep-analysis/scripts/reports/SPY_direction" \
+  --research-output-dated
+
+## ETF 定时运行（前台等待）
+
+不想在凌晨手动运行时，可在仓库根目录启动前台调度器。默认北京时间 03:50
+运行 SPY 和 QQQ，并同时刷新北京时间、纽约时间和倒计时：
+
+```bash
+python3 schedule_etf_research.py
+```
+
+如需让调度器持续运行、每个有效交易日自动预测一次，加上 `--continuous`（或
+`--repeat-daily`）。每次结果会按标的和预测目标日期写入独立目录，例如
+`reports/QQQ_direction_2026-09-02/`；按 `Ctrl+C` 停止：
+
+```bash
+python3 schedule_etf_research.py --continuous
+```
+
+查看下一次运行但不等待：
+
+```bash
+python3 schedule_etf_research.py --show-next
+```
+
+推荐用纽约时间配置，自动适配夏令时：
+
+```bash
+python3 schedule_etf_research.py --timezone America/New_York --time 15:50
+```
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
@@ -216,6 +262,7 @@ agent 会用 `--remote` 启动 Cloudflare Tunnel，给你一个 `https://xxx.try
 | `/stock-deep-analyzer:model-update 002273` | 🆕 v3.8 · 新财报/指引增量更新模型 · 假设 delta → DCF/thesis 影响 |
 | `/stock-deep-analyzer:returns` | 🆕 v3.8 · 组合收益归因 · 按持仓/行业拆解 + Top 贡献/拖累 |
 | `/stock-deep-analyzer:rebalance` | 🆕 v3.8 · 逐持仓再平衡 · 漂移 + 交易清单 + A股印花税/佣金换手成本 |
+| `/stock-deep-analyzer:qqq-0dte` | QQQ 专用次日方向 + 0DTE 样本外研究 · 真实 bid/ask 验证 · [数据契约](docs/QQQ-RESEARCH.md) |
 
 ### CLI 直跑进阶玩法（git clone 用户）
 

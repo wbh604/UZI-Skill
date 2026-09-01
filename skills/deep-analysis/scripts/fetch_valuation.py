@@ -8,7 +8,7 @@ from typing import Any
 
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
-from lib.market_router import parse_ticker
+from lib.market_router import classify_security_type, parse_ticker
 
 
 def _find_weighted_pe_col(df) -> str | None:
@@ -89,6 +89,28 @@ def dcf_sensitivity_matrix(
 def main(ticker: str) -> dict:
     ti = parse_ticker(ticker)
     basic = ds.fetch_basic(ti)
+
+    # 中证指数没有股票 PE/PB/DCF 的财报语义。这里至少把官方指数估值
+    # 文件中的股息率原样传到 10_valuation，避免再调用股票估值接口得到空值。
+    if classify_security_type(ti.code) == "index":
+        return {
+            "ticker": ti.full,
+            "data": {
+                "pe": basic.get("pe_ttm", "—"),
+                "pb": basic.get("pb", "—"),
+                "dividend_yield": basic.get("dividend_yield"),
+                "dividend_yield_1": basic.get("dividend_yield_1"),
+                "dividend_yield_2": basic.get("dividend_yield_2"),
+                "dividend_yield_as_of": basic.get("dividend_yield_as_of"),
+                "dividend_yield_status": basic.get("dividend_yield_status", "unavailable"),
+                "dividend_yield_source": basic.get("dividend_yield_source", "csindex"),
+                "dividend_yield_note": basic.get("dividend_yield_note"),
+                "dcf": "—",
+            },
+            "source": "csindex:stock_zh_index_value_csindex",
+            "fallback": False,
+        }
+
     pe_history: list = []
     pe_quantile_val = None
     pb_quantile_val = None

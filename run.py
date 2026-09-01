@@ -26,8 +26,10 @@ import subprocess
 import shutil
 import threading
 import time
+from datetime import date, datetime
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from zoneinfo import ZoneInfo
 
 # ─── 编码修复 ───
 if sys.platform == "win32":
@@ -465,8 +467,194 @@ def main():
                              "输出排名 + 加权评分 + 健康度 · 自动 resume")
     parser.add_argument("--output-dir", metavar="DIR", default=None,
                         help="v2.11.0 · SaaS 集成：把产出（standalone html + 图 + 摘要）拷贝到该目录，并在其中生成 index.html / report.meta.json。建议配合 --no-browser 使用。")
+    parser.add_argument("--qqq-research", action="store_true",
+                        help="ETF研究（兼容旧名称）：运行严格样本外次日方向/0DTE 研究，不走个股 22 维报告")
+    parser.add_argument("--etf-research", action="store_true",
+                        help="ETF次日方向研究入口：当前支持 QQQ/SPY；SPY支持underlying-only及8席评委会")
+    parser.add_argument("--market-csv", metavar="FILE", default=None,
+                        help="ETF研究的 long-form 行情及分钟锚点 CSV；不传则从 Yahoo/Cboe/FRED 等公开源下载 EOD 数据")
+    parser.add_argument("--context-csv", metavar="FILE", default=None,
+                        help="ETF研究的带时点 session context CSV（overnight/preopen 必填）")
+    parser.add_argument("--options-csv", metavar="FILE", default=None,
+                        help="ETF研究的历史期权 bid/ask CSV（不传则不评估期权 P&L）")
+    parser.add_argument("--research-output-dir", metavar="DIR",
+                        default=None,
+                        help="ETF研究输出目录（默认按标的写入 reports/{TICKER}_direction）")
+    parser.add_argument(
+        "--research-output-dated", action="store_true",
+        help="ETF研究：自动追加预测目标交易日目录（如 QQQ_direction_2026-09-02）",
+    )
+    parser.add_argument("--research-decision-time", choices=["overnight", "preopen", "close"], default="overnight",
+                        help="ETF信号时点：overnight（默认 · 15:50 冻结/15:55 买 1DTE/次日 10:00 卖）/preopen/close")
+    parser.add_argument("--research-years", type=int, default=8,
+                        help="无 --market-csv 时下载的 ETF 历史年数")
+    parser.add_argument("--research-allow-open-proxy", action="store_true",
+                        help="ETF仅方向研究：overnight 用 close->次日 close、preopen 用 open->close；不等同精确期权协议")
+    parser.add_argument("--research-underlying-only", action="store_true",
+                        help="只用所选ETF日线预测下一交易日收盘涨跌；支持QQQ/SPY")
+    parser.add_argument("--research-render-existing", action="store_true",
+                        help="ETF研究：只用已有 summary.json + oos_predictions.csv 离线生成可视化报告")
+    parser.add_argument("--research-direction-panel", action="store_true",
+                        help="ETF研究：生成可历史重放的8席次日方向专用评委会和票板；刷新时不带此参数将不保留旧票板")
+    parser.add_argument("--research-vix-csv", metavar="FILE", default=None,
+                        help="可选：ETF专用评委会VIX历史CSV（不传则自动下载）")
+    parser.add_argument("--research-tnx-csv", metavar="FILE", default=None,
+                        help="可选：ETF专用评委会10年美债历史CSV（不传则自动下载）")
     args = parser.parse_args()
     args._direct_report_path = None
+
+    if args.qqq_research or args.etf_research:
+        # This is deliberately a separate ETF research workflow.  Running the
+        # stock pipeline for QQQ produces ROE/DCF/LHB fields that have no
+        # predictive meaning for an index-tracking fund.
+        research_symbol = args.ticker.strip().upper().removesuffix(".US")
+        if research_symbol not in ("QQQ", "SPY"):
+            print("❌ ETF方向研究当前只接受 QQQ 或 SPY；ETF 不能套用个股研究流程。", file=sys.stderr)
+            raise SystemExit(2)
+        if research_symbol == "SPY" and not args.research_underlying_only:
+            print("❌ SPY 当前只支持 --research-underlying-only 正股方向研究。", file=sys.stderr)
+            raise SystemExit(2)
+        if (not args.research_underlying_only
+                and args.research_decision_time in ("overnight", "preopen")
+                and not args.context_csv):
+            print(f"❌ {args.research_decision_time} 模式必须提供 --context-csv（带 asof_timestamp 的时点特征）", file=sys.stderr)
+            raise SystemExit(2)
+        if args.research_direction_panel and not args.research_underlying_only:
+            print("❌ --research-direction-panel 必须与 --research-underlying-only 同时使用。", file=sys.stderr)
+            raise SystemExit(2)
+        try:
+            from lib.qqq_0dte import ResearchConfig, render_existing_underlying_report, run_from_files
+
+            def _research_path(value):
+                if not value:
+                    return None
+                p = Path(value).expanduser()
+                return str(p if p.is_absolute() else (ROOT_DIR / p).resolve())
+
+            research_output_dir = args.research_output_dir or (
+                f"skills/deep-analysis/scripts/reports/{research_symbol}_direction"
+            )
+            dated_output_base = None
+            if args.research_output_dated:
+                dated_output_base = Path(research_output_dir).expanduser()
+                if args.research_render_existing:
+                    # Offline rendering has no fresh signal from which to read
+                    # the target date, so use the next NYSE session as a best
+                    # effort directory suffix.
+                    from schedule_etf_research import next_nyse_trading_day
+                    target_date = next_nyse_trading_day(
+                        datetime.now(ZoneInfo("America/New_York")).date()
+                    )
+                    dated = dated_output_base.with_name(
+                        f"{dated_output_base.name}_{target_date.isoformat()}"
+                    )
+                else:
+                    # Fresh runs are initially written to a provisional dated
+                    # folder.  Once the model returns, we rename it using its
+                    # authoritative ``latest_signal.trade_date`` so the folder
+                    # cannot disagree with the actual forecast in the report.
+                    run_date = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+                    dated = dated_output_base.with_name(
+                        f"{dated_output_base.name}_{run_date.isoformat()}"
+                    )
+                research_output_dir = str(dated)
+
+            if args.research_render_existing:
+                report_dir = _research_path(research_output_dir)
+                if args.research_direction_panel:
+                    from qqq_direction_panel import run_panel
+                    run_panel(
+                        report_dir=report_dir,
+                        vix_csv=_research_path(args.research_vix_csv),
+                        tnx_csv=_research_path(args.research_tnx_csv),
+                        years=args.research_years,
+                        latest_signal_expired=True,
+                        underlying_symbol=research_symbol,
+                    )
+                result = render_existing_underlying_report(report_dir)
+                import json as _json
+                print(_json.dumps({
+                    "summary": result.get("artifacts", {}).get("summary"),
+                    "direction_report": result.get("artifacts", {}).get("direction_report"),
+                    "human_summary": result.get("human_summary"),
+                    "direction_oos": result.get("direction_oos"),
+                    "direction_panel": result.get("direction_panel"),
+                    "underlying_direction_gate": result.get("underlying_direction_gate"),
+                }, ensure_ascii=False, indent=2))
+                raise SystemExit(0)
+
+            result = run_from_files(
+                market_data_path=_research_path(args.market_csv),
+                session_context_path=_research_path(args.context_csv),
+                option_quotes_path=_research_path(args.options_csv),
+                output_dir=_research_path(research_output_dir),
+                config=ResearchConfig(
+                    decision_time="close" if args.research_underlying_only else args.research_decision_time,
+                    underlying_only=args.research_underlying_only,
+                    underlying_symbol=research_symbol,
+                    allow_open_proxy=args.research_allow_open_proxy,
+                ),
+                years=args.research_years,
+            )
+            if args.research_output_dated and dated_output_base is not None:
+                signal_date = (result.get("latest_signal") or {}).get("trade_date")
+                if signal_date:
+                    target_text = str(signal_date).split("T", 1)[0]
+                    try:
+                        target_date = date.fromisoformat(target_text)
+                    except ValueError:
+                        target_date = None
+                    if target_date is not None:
+                        current_dir = Path(research_output_dir)
+                        dated_dir = dated_output_base.with_name(
+                            f"{dated_output_base.name}_{target_date.isoformat()}"
+                        )
+                        if current_dir != dated_dir:
+                            if dated_dir.exists():
+                                print(
+                                    f"⚠️ 目标日期目录已存在，保留本次结果于：{current_dir}",
+                                    file=sys.stderr,
+                                )
+                            else:
+                                current_dir.rename(dated_dir)
+                                research_output_dir = str(dated_dir)
+                                # Refresh artifact paths in summary.json after
+                                # the rename; report content remains unchanged.
+                                result = render_existing_underlying_report(
+                                    dated_dir, offline_render=False
+                                )
+            # A fresh run may optionally include the replayable ETF specialist
+            # panel.  The panel consumes the just-written summary/OOS files,
+            # downloads VIX/TNX when CSVs are not supplied, then the HTML is
+            # rendered again so the new vote board appears in one command.
+            if args.research_direction_panel:
+                from qqq_direction_panel import run_panel
+                report_dir = _research_path(research_output_dir)
+                run_panel(
+                    report_dir=report_dir,
+                    vix_csv=_research_path(args.research_vix_csv),
+                    tnx_csv=_research_path(args.research_tnx_csv),
+                    years=args.research_years,
+                    latest_signal_expired=False,
+                    underlying_symbol=research_symbol,
+                )
+                result = render_existing_underlying_report(report_dir, offline_render=False)
+            import json as _json
+            print(_json.dumps({
+                "summary": result.get("artifacts", {}).get("summary"),
+                "direction_report": result.get("artifacts", {}).get("direction_report"),
+                "human_summary": result.get("human_summary"),
+                "latest_signal": result.get("latest_signal"),
+                "direction_oos": result.get("direction_oos"),
+                "option_oos": result.get("option_oos"),
+                "underlying_direction_gate": result.get("underlying_direction_gate"),
+                "direction_panel": result.get("direction_panel"),
+                "trade_authorized": result.get("deployment_gate", {}).get("trade_authorized"),
+            }, ensure_ascii=False, indent=2))
+            raise SystemExit(0)
+        except Exception as exc:
+            print(f"❌ {research_symbol} research 失败: {type(exc).__name__}: {exc}", file=sys.stderr)
+            raise SystemExit(2)
 
     # v2.10.5 · run.py 是 CLI 直跑入口（agent 流程走 stage1/stage2 直接调用，不经 run.py）。
     # 设 UZI_CLI_ONLY=1 让 self_review 对 agent_analysis.json 缺失 / 低 coverage 做宽容处理

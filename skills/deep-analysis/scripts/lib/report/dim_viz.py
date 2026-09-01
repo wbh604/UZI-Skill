@@ -100,6 +100,10 @@ def _viz_valuation(raw: dict) -> str:
     pe = raw.get("pe", "—")
     industry_pe = raw.get("industry_pe", "—")
     dcf = raw.get("dcf", "—")
+    div_yield = raw.get("dividend_yield")
+    div_yield_2 = raw.get("dividend_yield_2")
+    div_status = raw.get("dividend_yield_status")
+    div_note = raw.get("dividend_yield_note")
 
     # Gauge
     viz = f'<div style="text-align:center">{svg_gauge(val, 100, "PE 5 年分位数", color=color, unit="%")}</div>'
@@ -126,6 +130,25 @@ def _viz_valuation(raw: dict) -> str:
     <div style="font-family:Fira Code;font-size:9px;color:#64748b">DCF 内在</div>
     <div style="font-family:Fira Sans;font-size:16px;color:#0f172a;font-weight:700">{dcf}</div>
   </div>
+</div>'''
+
+    # CSI index valuation publishes dividend yield separately from stock
+    # quote snapshots. Show its provenance/status instead of turning a blank
+    # value into a misleading 0%.
+    if div_yield is not None or div_yield_2 is not None or div_status == "unavailable":
+        if div_yield is not None:
+            div_text = f"{div_yield:.2f}%"
+            if div_yield_2 is not None:
+                div_text += f" / {div_yield_2:.2f}%"
+            div_color = COLOR_BULL
+        else:
+            div_text = "暂无可验证"
+            div_color = COLOR_GOLD
+        note = div_note or "中证指数估值源"
+        viz += f'''<div style="margin-top:10px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;text-align:left">
+  <div style="font-family:Fira Code;font-size:9px;color:#64748b">指数股息率1 / 股息率2（中证估值文件）</div>
+  <div style="font-family:Fira Sans;font-size:16px;color:{div_color};font-weight:700">{div_text}</div>
+  <div style="font-size:10px;color:#64748b;margin-top:3px">{note}</div>
 </div>'''
 
     # DCF sensitivity matrix if present
@@ -756,4 +779,3 @@ DIM_VIZ_RENDERERS = {
     "18_trap":         _viz_trap,
     "19_contests":     _viz_contests,
 }
-

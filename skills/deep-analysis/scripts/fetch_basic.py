@@ -80,11 +80,12 @@ def main(user_input: str) -> dict:
         }
 
     data = ds.fetch_basic(ti)
+    source = "akshare:csindex" if sec_type == "index" else f"akshare:{ti.market}"
     return {
         "ticker": ti.full,
         "market": ti.market,
         "data": data,
-        "source": f"akshare:{ti.market}",
+        "source": source,
         "fallback": False,
     }
 

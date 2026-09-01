@@ -146,6 +146,10 @@ def _check_non_stock_security(ti) -> dict | None:
                         "已自动改为分析该基金的前 10 大重仓股（akshare.fund_portfolio_hold_em）"),
         "convertible_bond": ("可转债", "可转债看转股价/溢价率/到期收益率，不是 ROE", "分析正股或用集思录的可转债工具"),
     }
+    # 中证指数（Hxxxxx）有专用的指数估值/股息率采集路径，不应再被当成
+    # ETF 或个股错误拦截；其它非个股标的仍按原有引导处理。
+    if sec_type == "index":
+        return None
     if sec_type not in NON_STOCK_GUIDANCE:
         return None
 

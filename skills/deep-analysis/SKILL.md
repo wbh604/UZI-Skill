@@ -82,6 +82,11 @@ metadata:
 ### ⛔ HARD-GATE-NON-STOCK · ETF/LOF/可转债 必须引导到成分股（v2.9.2）
 
 <HARD-GATE>
+**QQQ 专用研究例外**：当用户明确请求 QQQ 次日方向、回测或 0DTE/末日期权时，
+不要进入本个股 pipeline，也不要引导到成分股；改读仓库
+`docs/QQQ-RESEARCH.md`，调用 `python run.py QQQ --qqq-research ...`。
+该专用路径严格要求时点数据和真实期权 bid/ask，未达到门槛不得输出可交易结论。
+
 若 `stage1()` 返回 `{"status": "non_stock_security", "security_type": "etf|lof|convertible_bond", ...}`
 （或 `.cache/{ticker}/_resolve_error.json` 有 `status: non_stock_security`），
 你**绝不能**假装继续跑——65 评委规则全是个股财务指标，ETF/基金/可转债

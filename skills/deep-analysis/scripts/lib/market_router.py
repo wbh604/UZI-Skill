@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 Market = Literal["A", "H", "U"]
-SecurityType = Literal["stock", "etf", "lof", "convertible_bond", "mutual_fund", "unknown"]
+SecurityType = Literal["stock", "etf", "lof", "convertible_bond", "mutual_fund", "index", "unknown"]
 
 
 @dataclass
@@ -25,6 +25,7 @@ _RE_A_NUMERIC = re.compile(r"^\d{6}$")
 _RE_A_FULL = re.compile(r"^(\d{6})\.(SZ|SH|BJ)$", re.I)
 _RE_HK = re.compile(r"^(\d{4,5})(?:\.HK)?$", re.I)
 _RE_US = re.compile(r"^[A-Z][A-Z\.\-]{0,5}$")
+_RE_CSINDEX = re.compile(r"^H\d{5}$")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -102,6 +103,10 @@ def classify_security_type(code6: str) -> SecurityType:
     - etf / lof / mutual_fund → 走 fund_holdings_runner (循环持仓)
     - convertible_bond → early-exit（不适合）
     """
+    # 中证指数代码（例如 H30269）不是 A 股股票代码，但历史上会被
+    # parse_ticker 的最后兜底分支误当成 A 股。单独识别后由指数数据源处理。
+    if _RE_CSINDEX.fullmatch(str(code6).upper()):
+        return "index"
     if not code6 or not code6.isdigit() or len(code6) != 6:
         return "unknown"
     # ETF (SH 50/51/52/56/58, SZ 159)
@@ -172,6 +177,11 @@ def _is_mutual_fund_code(code6: str) -> bool:
 def parse_ticker(raw: str) -> TickerInfo:
     """Best-effort parse. For Chinese names (e.g. '水晶光电'), caller must resolve via fetch_basic first."""
     s = raw.strip().upper().replace(" ", "")
+
+    # 中证指数使用 H + 5 位数字编码（如 H30269）。保留 market=A 以兼容
+    # 现有数据管道的 A/H/U 三市场 schema，security_type=index 负责分流。
+    if _RE_CSINDEX.fullmatch(s):
+        return TickerInfo(raw=raw, code=s, full=s, market="A")
 
     m = _RE_A_FULL.match(s)
     if m:

@@ -1445,7 +1445,7 @@ body::after {
 /* ═══════════════ FRIENDLY TRIO · 友好层 ═══════════════ */
 .friendly-trio {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin: 40px 0 30px;
 }
@@ -1459,6 +1459,10 @@ body::after {
   box-shadow: var(--shadow-md);
 }
 .friendly-card.scenario { background: linear-gradient(135deg, var(--gold-tint), #fff); border-color: var(--neon-gold); }
+.friendly-card.bias.bullish { background: linear-gradient(135deg, var(--bull-tint), #fff); border-color: var(--bull-green); }
+.friendly-card.bias.bearish { background: linear-gradient(135deg, var(--bear-tint), #fff); border-color: var(--bear-red); }
+.friendly-card.bias.neutral { background: linear-gradient(135deg, var(--cyan-tint), #fff); border-color: var(--accent-blue); }
+.friendly-card.backtest { background: linear-gradient(135deg, rgba(15,118,110,.06), #fff); border-color: rgba(15,118,110,.32); }
 .friendly-card.similar { background: linear-gradient(135deg, var(--cyan-tint), #fff); border-color: var(--neon-cyan); }
 .friendly-card.exit { background: linear-gradient(135deg, var(--bear-tint), #fff); border-color: var(--bear-red); }
 .friendly-card .fc-icon { font-size: 32px; margin-bottom: 6px; }
@@ -1475,6 +1479,139 @@ body::after {
   line-height: 1.65;
 }
 .friendly-card .fc-body strong { color: var(--text-bright); }
+
+.bias-score {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--text-bright);
+  font-size: 15px;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+.bias-score span { font-size: 34px; line-height: 1; }
+.bias-sub {
+  font-size: 11px;
+  font-family: 'Fira Code', monospace;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.bias-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148,163,184,.18);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.bias-bar div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-blue), var(--bull-green));
+}
+.bias-summary {
+  font-size: 12px;
+  color: var(--text-main);
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.bias-components {
+  display: grid;
+  gap: 6px;
+}
+.bias-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 34px;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  font-family: 'Fira Code', monospace;
+  padding: 6px 8px;
+  background: rgba(255,255,255,.8);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.bias-name { font-weight: 700; color: var(--text-bright); }
+.bias-note { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bias-delta { text-align: right; font-weight: 800; color: var(--text-bright); }
+.bias-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.bias-pill {
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.9);
+  color: var(--text-main);
+}
+.bias-list.bullish .bias-pill { border-color: rgba(5,150,105,.35); }
+.bias-list.bearish .bias-pill { border-color: rgba(220,38,38,.35); }
+
+.backtest-window {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'Fira Code', monospace;
+  margin-bottom: 10px;
+}
+.backtest-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.backtest-summary div {
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(255,255,255,.85);
+}
+.backtest-summary span {
+  display: block;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+  font-family: 'Fira Code', monospace;
+}
+.backtest-summary strong {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 15px;
+  color: var(--text-bright);
+}
+.backtest-current {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(14,165,233,.08);
+  border: 1px solid rgba(14,165,233,.18);
+  font-size: 11px;
+  color: var(--text-main);
+  margin-bottom: 10px;
+  font-family: 'Fira Code', monospace;
+}
+.backtest-table {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.backtest-row {
+  display: grid;
+  grid-template-columns: 72px repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+  font-family: 'Fira Code', monospace;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(255,255,255,.8);
+}
+.backtest-n { font-weight: 800; color: var(--text-bright); }
+.backtest-metric { color: var(--text-dim); text-align: center; }
+.backtest-note { font-size: 10px; color: var(--text-dim); font-family: 'Fira Code', monospace; }
 
 .scenario-row {
   display: flex;

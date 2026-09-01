@@ -154,7 +154,9 @@ def extract_features(raw: dict, dims: dict) -> dict:
 
     # Dividend
     f["consecutive_dividend_years"] = len(div_years)
-    f["dividend_yield"] = _f(basic.get("dividend_yield_ttm"))
+    f["dividend_yield"] = _f(
+        basic.get("dividend_yield_ttm") or basic.get("dividend_yield")
+    )
     f["total_dividend_5y_per_10"] = sum(_f(v) for v in div_amounts[-5:])
 
     # ─────────────── K-LINE / TECHNICAL ───────────────
@@ -383,7 +385,12 @@ def extract_features(raw: dict, dims: dict) -> dict:
     else:
         f["market_share"] = 0.0
     # Dividend yield from valuation/basic
-    f["dividend_yield"] = _f(valuation.get("dividend_yield"), default=0)
+    f["dividend_yield"] = _f(
+        valuation.get("dividend_yield")
+        or basic.get("dividend_yield_ttm")
+        or basic.get("dividend_yield"),
+        default=0,
+    )
     # PEG
     peg_val = f.get("pe", 0) / f.get("rev_growth_3y", 1) if f.get("rev_growth_3y", 0) > 0 else 99
     f["peg"] = round(peg_val, 2)

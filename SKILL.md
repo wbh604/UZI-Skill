@@ -25,6 +25,9 @@ Use the narrowest matching workflow:
   read `skills/trap-detector/SKILL.md`.
 - Command-specific requests:
   read the matching file under `commands/`.
+- QQQ next-session direction or 0DTE option research:
+  read `commands/qqq-0dte.md` and `docs/QQQ-RESEARCH.md`; use the dedicated
+  point-in-time workflow instead of the stock-analysis pipeline.
 
 ## Default Execution
 

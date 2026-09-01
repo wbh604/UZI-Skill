@@ -15,7 +15,10 @@ class ValuationRenderer(SectionRenderer):
         ps = d.get("ps_ttm") or d.get("ps") or "—"
         pe_pct = d.get("pe_percentile") or "—"
         pb_pct = d.get("pb_percentile") or "—"
-        div_yield = d.get("dividend_yield") or d.get("dividend_yield_ttm") or "—"
+        div_yield = d.get("dividend_yield") or d.get("dividend_yield_ttm")
+        if div_yield is None and d.get("dividend_yield_status") == "unavailable":
+            div_yield = "暂无可验证"
+        div_yield = div_yield or "—"
 
         return f'''<section id="{self.section_id}">
   <h2>{self.section_title}</h2>
