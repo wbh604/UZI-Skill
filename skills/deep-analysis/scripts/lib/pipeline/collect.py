@@ -99,17 +99,49 @@ def _run_fetcher_job(dim_key: str, ticker: Any, raw_context: dict | None = None)
     return dim_key, result.to_dict(), result.top_level_fields
 
 
+def _dims_aliasing_top_level() -> frozenset[str]:
+    """dim_key 与自身 top_level 字段同名的 dim（当前只有 similar_stocks）。
+
+    这些 key 在 raw_data.json 里是「顶层字段」而非「维度记录」（run_pipeline 会把
+    它们从 dimensions 里摘出去），下游按字段类型消费。
+    """
+    aliased = set()
+    for dim_key, cls in FETCHER_REGISTRY.items():
+        spec = getattr(cls, "spec", None)
+        if spec and dim_key in (spec.top_level_fields or ()):
+            aliased.add(dim_key)
+    return frozenset(aliased)
+
+
+_DIMS_ALIASING_TOP_LEVEL = _dims_aliasing_top_level()
+
+
+def _ensure_top_level_field(out: dict[str, Any], dim_key: str) -> None:
+    """保证「dim_key 与顶层字段同名」的 key 存的是字段值（list），而不是 DimResult 结构。
+
+    similar_stocks 的 dim_key 和它的 top_level_fields 都是 "similar_stocks"：
+    _apply_outcome 先写 DimResult 结构、再由 top_level 覆盖。一旦 fetcher 失败/超时，
+    或成功但顶层字段为空，结构就留在了字段位置上。下游 run_pipeline 把它当顶层字段
+    摘出 dimensions、score_fns 按 list 消费，于是 similar[:4] 抛
+    ``KeyError: slice(None, 4, None)`` → 报告渲染崩溃 → run.py 整轮 fallback legacy 重跑。
+    """
+    if dim_key in _DIMS_ALIASING_TOP_LEVEL and not isinstance(out.get(dim_key), list):
+        out[dim_key] = []
+
+
 def _apply_outcome(out: dict[str, Any], outcome: ProcessOutcome) -> None:
     if outcome.error:
         source = "pipeline:timeout" if outcome.timed_out else "pipeline:worker"
         out[outcome.key] = DimResult.error_result(outcome.key, outcome.error, source=source).to_dict()
         marker = "timeout" if outcome.timed_out else "error"
         print(f"    {marker:7s} {outcome.key:20s} {outcome.error[:80]}")
+        _ensure_top_level_field(out, outcome.key)
         return
     dim_key, result_dict, top_level = outcome.value
     out[dim_key] = result_dict
     for key, value in top_level.items():
         out[key] = value
+    _ensure_top_level_field(out, dim_key)
     quality = (result_dict.get("_pipeline") or {}).get("quality", "?")
     print(f"    ok      {dim_key:20s} {quality}")
 

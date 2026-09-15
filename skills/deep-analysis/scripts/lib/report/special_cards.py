@@ -72,6 +72,14 @@ def render_friendly_layer(syn: dict, raw: dict) -> str:
 
     # ── Similar stocks ──
     similar = friendly.get("similar_stocks") or []
+    # v3.9.x · 渲染层防御：该字段在 pipeline 路径下可能是 dict —— fetcher 失败时
+    # DimResult 结构会占住顶层字段位置（见 collect._ensure_top_level_field）。
+    # 渲染层不该因数据形状把整份报告 KeyError 掉。
+    if isinstance(similar, dict):
+        similar = similar.get("similar_stocks") or similar.get("data") or []
+    if not isinstance(similar, list):
+        similar = []
+    similar = [s for s in similar if isinstance(s, dict)]
     similar_pills = ""
     for s in similar[:4]:
         name = s.get("name", "")
