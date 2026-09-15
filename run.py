@@ -464,6 +464,41 @@ def _maybe_prompt_update() -> None:
         pass
 
 
+def _cached_profile_depth(ticker: str) -> str | None:
+    """读缓存里记录的采集档位 · 供 --from-modeling 复用.
+
+    v3.9.x 起 raw_data.json 顶层带 ``_profile_depth``（采集时由 write_task_output 写入）。
+    更早的缓存没有该字段，按已采维度反推：lite 的声明维度是三档里唯一的严格子集，
+    若 lite 维度全在、而 medium 维度不全，判定为 lite。
+    """
+    scripts_dir = Path(__file__).parent / "skills" / "deep-analysis" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from lib.cache import read_task_output
+        from lib.market_router import parse_ticker
+        raw = read_task_output(parse_ticker(ticker).full, "raw_data") or {}
+    except Exception:
+        return None
+
+    recorded = raw.get("_profile_depth")
+    if recorded in ("lite", "medium", "deep"):
+        return recorded
+
+    dims = set((raw.get("dimensions") or {}).keys())
+    if not dims:
+        return None
+    try:
+        from lib.analysis_profile import get_profile
+        lite_dims = set(get_profile("lite").fetchers_enabled)
+        medium_dims = set(get_profile("medium").fetchers_enabled)
+    except Exception:
+        return None
+    if lite_dims <= dims and not medium_dims <= dims:
+        return "lite"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="游资（UZI）Skills · 个股深度分析",
@@ -513,6 +548,16 @@ def main():
 
     # v2.14.0 · 自动检测 GitHub 新版本 · interactive prompt(y/s/n) · 非 TTY 静默
     _maybe_prompt_update()
+
+    # v3.9.x · --from-modeling 复用缓存时，档位必须与采集时一致。
+    # 缓存此前不记录档位，命令行省略 --depth 又会回落 medium，于是 lite 采的缓存
+    # 被按 medium 的 20 维跑自查闸 → 误报 8 个 critical → RuntimeError: BLOCKED by
+    # self-review，用户无从得知要补 --depth lite。
+    if args.from_modeling and not args.depth:
+        _cached_depth = _cached_profile_depth(args.ticker)
+        if _cached_depth:
+            args.depth = _cached_depth
+            print(f"♻️  --from-modeling · 从缓存推断档位: --depth {_cached_depth}")
 
     # v2.10.2 · 深度选择（优先级: --depth > UZI_DEPTH env > UZI_LITE env > 默认 medium）
     try:

@@ -131,6 +131,14 @@ def market_status(market: str = "A", now: datetime | None = None) -> dict:
 
 def write_task_output(ticker: str, task_name: str, data: dict) -> Path:
     """Write a task's final JSON to .cache/{ticker}/{task_name}.json"""
+    # v3.9.x · raw_data 记录采集时的思考档位。
+    # --from-modeling 复用缓存时必须让 profile 与采集时一致：命令行省略 --depth 时
+    # get_profile() 会回落 medium，于是 lite 采的缓存被按 medium 的 20 维跑自查闸
+    # → 误报 critical 并拒绝生成报告，而用户无从得知要补 --depth lite。
+    if task_name == "raw_data" and isinstance(data, dict) and "_profile_depth" not in data:
+        _depth = os.environ.get("UZI_DEPTH")
+        if _depth in ("lite", "medium", "deep"):
+            data = {**data, "_profile_depth": _depth}
     path = CACHE_ROOT / ticker / f"{task_name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
