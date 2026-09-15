@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 from .cache import cached, TTL_QUARTERLY
@@ -32,6 +33,31 @@ except ImportError:
 QUANT_TOP1_THRESHOLD = 2.0       # 第一大持仓占净值 < 2% → 疑似量化
 QUANT_FACTOR_MIN_COUNT = 3       # 至少 3 家量化基金 top-10 持有 → 触发 style
 HOLDINGS_QUARTER = "2025"        # akshare 接受年份；后期可按当前季度自动算
+
+# 扫描预算 · 判定只需凑够 QUANT_FACTOR_MIN_COUNT 家即可定性，
+# 没必要对全部持仓基金逐只抓 top-10（贵州茅台实测 695 家 → 695 次 akshare 调用）。
+_QUANT_MAX_FUNDS_BY_DEPTH = {"lite": 20, "medium": 80, "deep": 0}   # 0 = 不限制
+_QUANT_MAX_FUNDS_FALLBACK = 80
+
+
+def quant_max_funds() -> int:
+    """本次量化扫描参与的基金数上限 · 0 表示不限制.
+
+    优先级：``UZI_QUANT_MAX_FUNDS`` env > 按当前 depth 档位默认
+    （lite 20 / medium 80 / deep 不限）。档位不可读时回落 80。
+    """
+    raw = os.environ.get("UZI_QUANT_MAX_FUNDS")
+    if raw is not None:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    try:
+        from .analysis_profile import get_profile
+        depth = get_profile().depth
+    except Exception:
+        depth = "medium"
+    return _QUANT_MAX_FUNDS_BY_DEPTH.get(depth, _QUANT_MAX_FUNDS_FALLBACK)
 
 
 # ─── 私募量化备查名单 ──
@@ -102,14 +128,15 @@ def _fetch_all_holding_funds(ticker_code: str, max_funds: int = 80) -> list[dict
 
 
 def detect_quant_signal(stock_code: str, fund_managers: list[dict] | None = None,
-                        max_funds: int = 80) -> dict:
+                        max_funds: int | None = None) -> dict:
     """对所有持有本股的基金，识别量化属性 + 是否 top-10 持有。
 
     Args:
         stock_code: full ticker like "600120.SH" or "600120"
         fund_managers: list from raw["fund_managers"]; if empty/None, will auto-fetch
                        up to max_funds via fetch_holding_funds (不受 wave3 limit=6 制约)
-        max_funds: cap on auto-fetched funds (only used when fund_managers is None/empty)
+        max_funds: 参与扫描的基金数上限 · None → quant_max_funds()（按 depth 档位取默认值）。
+                   0 → 不限制。既约束自动扩容的样本，也约束调用方传入的列表。
 
     Returns:
         {
@@ -126,10 +153,12 @@ def detect_quant_signal(stock_code: str, fund_managers: list[dict] | None = None
         }
     """
     code5 = (stock_code or "").split(".")[0].strip()
+    cap = quant_max_funds() if max_funds is None else max(0, max_funds)
 
     # 样本太小时（如 wave3 默认 6 个）自动拉更大样本
     if not fund_managers or len(fund_managers) < 20:
-        bigger = _fetch_all_holding_funds(code5, max_funds=max_funds)
+        bigger = _fetch_all_holding_funds(
+            code5, max_funds=cap or _QUANT_MAX_FUNDS_FALLBACK)
         if bigger:
             fund_managers = bigger
 
@@ -139,6 +168,13 @@ def detect_quant_signal(stock_code: str, fund_managers: list[dict] | None = None
             "active_funds_total": 0, "quant_funds_total": 0,
             "is_quant_factor_style": False,
         }
+
+    # 此前 cap 只作用于"自动扩容"分支：调用方传入的完整列表（贵州茅台实测 695 家，
+    # fetch_holding_funds v2.4 起 limit=None 不封顶）会被逐只扫完 → 695 次 akshare
+    # 调用，lite 档冷跑因此耗时 17 分钟。此处对已有列表统一施加预算。
+    # 列表在 fetch_fund_holders 中已按持仓比例降序，取前 cap 家即最大的 cap 家。
+    if cap and len(fund_managers) > cap:
+        fund_managers = fund_managers[:cap]
 
     def _check_one(m: dict) -> dict | None:
         fund_code = m.get("fund_code")
