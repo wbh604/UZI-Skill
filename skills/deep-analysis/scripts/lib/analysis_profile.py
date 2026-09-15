@@ -131,6 +131,12 @@ _ALL_FETCHERS = frozenset({
     "16_lhb", "17_sentiment", "18_trap", "19_contests",
 })
 
+# 档位管辖的全部 fetcher 维度（三档 fetchers_enabled 的并集）。
+# pipeline.collect 用它区分「由档位决定跑不跑」和「不归档位管辖」：
+# 不在其中的 dim 只提供顶层字段（6_fund_holders → fund_managers、
+# similar_stocks → 类似股卡片），任何档位都必须照跑，否则报告会丢卡片。
+ALL_FETCHER_DIMS = _ALL_FETCHERS
+
 _PROFILES: dict[str, AnalysisProfile] = {
     DEPTH_LITE: AnalysisProfile(
         depth=DEPTH_LITE,

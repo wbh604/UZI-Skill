@@ -37,6 +37,20 @@ def is_pipeline_enabled() -> bool:
     return os.environ.get("UZI_PIPELINE") == "1"
 
 
+def _dim_scope() -> tuple[frozenset[str] | None, frozenset[str]]:
+    """返回 (本档位启用的 fetcher 维度, 档位管辖的全部维度)。
+
+    读取 profile 失败 → (None, frozenset())，表示不做裁剪，保持 v3.0 原行为
+    （宁可多跑，也不要因为 profile 异常而中断采集）。
+    """
+    try:
+        from ..analysis_profile import ALL_FETCHER_DIMS, get_profile
+        return frozenset(get_profile().fetchers_enabled), frozenset(ALL_FETCHER_DIMS)
+    except Exception as e:
+        print(f"  [pipeline] ⚠ 读取 analysis_profile 失败 · 不做档位裁剪: {e}")
+        return None, frozenset()
+
+
 def _mini_racer_disabled() -> bool:
     if os.environ.get("UZI_DISABLE_MINI_RACER") == "1":
         return True
@@ -137,6 +151,17 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
     out: dict[str, Any] = {}
     raw_previous = raw_previous or {}
 
+    # v3.9.x · 按 analysis_profile 裁剪 fetcher 集合。
+    # 此前 collect 完全没接 profile：--depth lite 声明只跑 7 维，这里却把注册表里
+    # 22 个 fetcher 全跑了一遍，档位对采集阶段完全失效（实测 lite 仍跑 22 维）。
+    enabled_dims, governed_dims = _dim_scope()
+
+    def _in_scope(dim_key: str) -> bool:
+        if enabled_dims is None or dim_key in enabled_dims:
+            return True
+        # 不在任何档位声明范围内 → 不归档位管辖（顶层字段提供者），照跑
+        return dim_key not in governed_dims
+
     # Wave 1 · 0_basic 必须先跑
     basic_fetcher = get_fetcher("0_basic")
     basic_dim = raw_previous.get("dimensions", {}).get("0_basic")
@@ -157,8 +182,15 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
 
     # Wave 2 · 非依赖型 fetcher 并发
     non_dep_dims = [d for d in FETCHER_REGISTRY.keys()
-                    if d not in DEPENDENT_DIMS and d != "0_basic"]
+                    if d not in DEPENDENT_DIMS and d != "0_basic" and _in_scope(d)]
     print(f"  [pipeline] wave 2 · {len(non_dep_dims)} fetcher (max_workers={max_workers})")
+
+    if enabled_dims is not None:
+        skipped_dims = sorted(d for d in FETCHER_REGISTRY
+                              if d != "0_basic" and not _in_scope(d))
+        if skipped_dims:
+            print(f"  [pipeline] 档位裁剪 · 跳过 {len(skipped_dims)} 维: "
+                  f"{', '.join(skipped_dims)}")
 
     jobs: list[ProcessJob] = []
     fetcher_timeout = _positive_env_float("UZI_PIPELINE_FETCHER_TIMEOUT", 120.0)
@@ -197,6 +229,8 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
         raw_for_deps["1_financials"] = out["1_financials"]
     dependent_jobs: list[ProcessJob] = []
     for dim_key in sorted(DEPENDENT_DIMS):
+        if not _in_scope(dim_key):
+            continue
         fetcher = get_fetcher(dim_key)
         if not fetcher:
             continue
