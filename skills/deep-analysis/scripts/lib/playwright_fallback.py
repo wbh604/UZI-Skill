@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from lib.browser_locator import browser_launch_kwargs, find_local_browser
+
 # ─── 配置 ─────────────────────────────────────────────────────────
 
 UA_PC = (
@@ -85,9 +87,16 @@ def _is_playwright_pkg_installed() -> bool:
 
 
 def _is_chromium_installed() -> bool:
-    """检测 Playwright 的 Chromium 是否已下载（通过尝试取路径）."""
+    """检测浏览器是否可用：优先系统 Chrome/Edge，其次 Playwright 自带 Chromium.
+
+    复用系统浏览器可省掉 ``playwright install chromium`` 的 ~150 MB 下载，
+    且在没有外网的机器上也能直接工作。探测不到时行为与旧版一致。
+    """
     if not _is_playwright_pkg_installed():
         return False
+    # 本地 Chrome / Edge 优先（跨平台探测见 lib/browser_locator）
+    if find_local_browser():
+        return True
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
@@ -124,8 +133,13 @@ def _pip_install_playwright() -> bool:
 
 
 def _install_chromium_browser() -> bool:
-    """playwright install chromium · 下载 ~150 MB · stdout 可见."""
-    print("   📥 下载 Chromium 浏览器 (~150 MB · 仅首次 · 之后永久复用)...")
+    """确保有可用浏览器：本地 Chrome/Edge 优先，否则才下载 Playwright Chromium."""
+    local = find_local_browser()
+    if local:
+        print(f"   ✓ 复用系统浏览器：{local}（跳过 Chromium 下载）")
+        return True
+
+    print("   📥 未找到系统 Chrome/Edge · 下载 Chromium (~150 MB · 仅首次 · 之后永久复用)...")
     print("      大陆网络可能 3-5 分钟 · 可 Ctrl+C 中断降级")
     r = subprocess.run(
         [sys.executable, "-m", "playwright", "install", "chromium"],
@@ -221,7 +235,7 @@ def fetch_url(url: str, wait_for: str | None = None, timeout: int = DEFAULT_TIME
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, **browser_launch_kwargs())
             ctx = browser.new_context(user_agent=UA_PC, locale="zh-CN")
             page = ctx.new_page()
             page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
