@@ -14,7 +14,7 @@
 
 **A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. 66 investors × 9 schools × 22 dimensions × 22 institutional methods, all free data sources, zero API keys. Main updated 2026-10-18: missing-evidence gates and fund-holdings freshness. Manifest version: v3.9.4. Offline tests: 948 passed, 1 skipped.**
 
-[Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-66-investor-jury) · [Methods](#-22-institutional-methods) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq)
+[Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-66-investor-jury) · [Methods](#-22-institutional-methods) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq) · [QQ Group](#qq-group)
 
 **English** | [中文](README.md)
 
@@ -68,13 +68,19 @@ After 5-8 minutes you get:
 
 ---
 
-## 💬 Test Group & Feedback
+<a id="qq-group"></a>
 
-This is early-stage; forum reports plenty of bugs. If you want to help test or just trade notes, WeChat group QR below (primarily Chinese-speaking — if you prefer English, file issues on GitHub and we'll reply). For the latest features, track the `develop` branch.
+## QQ Group & Feedback
+
+**uziskill community · QQ group: 1126403930**
+
+Search for group **1126403930** in QQ, or scan the QR code below. The group is primarily Chinese-speaking; for English-language feedback, please open an issue on GitHub.
 
 <p align="center">
-  <img src="docs/screenshots/76fd0d2420e4c1a646514670c918dcf5.jpg" width="300" alt="WeChat group QR code" />
+  <img src="docs/screenshots/qq-group-1126403930.png" width="300" alt="uziskill QQ group QR code, group number 1126403930" />
 </p>
+
+> For plugin support, bug reports, quantitative research and other interesting projects, not individual stock discussion.
 
 ---
 
