@@ -10,9 +10,9 @@
 [![Dimensions](https://img.shields.io/badge/Dimensions-22-brightgreen)]()
 [![Investors](https://img.shields.io/badge/Investors-66-orange)]()
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-22-red)]()
-[![Tests](https://img.shields.io/badge/Tests-948%20passed%20%2F%201%20skipped-brightgreen)](https://github.com/wbh604/UZI-Skill/actions/runs/39051456863)
+[![Tests](https://img.shields.io/badge/Offline%20tests-973%20passed-brightgreen)](skills/deep-analysis/scripts/tests)
 
-**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. 66 investors × 9 schools × 22 dimensions × 22 institutional methods, all free data sources, zero API keys. Main updated 2026-10-18: missing-evidence gates and fund-holdings freshness. Manifest version: v3.9.4. Offline tests: 948 passed, 1 skipped.**
+**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. 66 investors × 9 schools × 22 dimensions × 22 institutional methods. Main updated 2026-11-05: industry fund-flow rotation research. Core analysis uses public sources; the optional rotation tool requires a user-supplied BigQuant CSV. Manifest version: v3.9.4.**
 
 [Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-66-investor-jury) · [Methods](#-22-institutional-methods) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq) · [QQ Group](#qq-group)
 
@@ -28,10 +28,19 @@ These maintenance updates are on `main`; they do not represent a new version tag
 
 | Version / Track | Date | Changes |
 | --- | --- | --- |
+| **main maintenance** | **2026-11-05** | Add isolated `rotate.py`: CITIC 40-industry active-flow factors, W20–24 rankings, weekly model targets, JSON/CSV/HTML, and separately imported Shenwan proxy observations. Authorized input data is not bundled; no automatic trading or performance claims. [Method and data contract](docs/industry-rotation.md). |
 | **main maintenance** | **2026-10-18** | Preserve real zero/loss values while unknown evidence and placeholder rules abstain. Use actual returned holdings quarters, normalize fund identities and percentage weights, reject stale/invalid samples, and display report-period coverage. Added 56 regressions; **948 passed, 1 skipped**. [Commit b49bccd](https://github.com/wbh604/UZI-Skill/commit/b49bccdd84c385a491a2001d2297ad256b10b0d7), [details](docs/maintenance-2026-10-17.md). |
 | **main maintenance** | **2026-10-16** | Integrate PRs #114–#117 and #119–#122: scan budgets, profile-aware caches, issuer checks, LHB evidence, model gates, abstention and consensus recalculation; fix valuation percentiles and the macOS hook. **892 passed, 1 skipped**. [Commit 2c5505d](https://github.com/wbh604/UZI-Skill/commit/2c5505d9d30363379ce708f85cac93f86b2788cf), [details](docs/maintenance-2026-10-16.md). |
 
 Offline regression results do not verify live data availability or investment performance. See [full release notes](RELEASE-NOTES.md) for earlier versions.
+
+### Industry Fund-Flow Rotation
+
+```bash
+python3 rotate.py --bigquant /path/to/citic_industry_fund_flow.csv --as-of 2026-11-04
+```
+
+Uses Python's standard library. Produces dated HTML, JSON and CSV with base and approximate five-factor rankings, W20–24 common selections, and last confirmed weekly model targets. Optional `--proxy-json` imports a dated Shenwan30 observation from the source research tool; it never enters the formal CITIC40 calculation. No live data download, backtest-return claims, ETF mapping or order execution. Existing stock analysis and screening gates are unchanged. See the [data contract and limitations](docs/industry-rotation.md).
 
 ## 🌏 Why Western Investors Should Care
 
