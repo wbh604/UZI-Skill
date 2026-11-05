@@ -1,4 +1,4 @@
-"""Conservation-constrained approximate flow solver ported from allw_lbw.
+"""Conservation-constrained approximate flow solver for industry rotation research.
 
 This is not the unpublished optimizer from the original research report.
 """

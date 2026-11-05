@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lib.industry_rotation.core import INDUSTRIES, daily_factors, load_bigquant_panel, make_schedule, signal_scores
+from lib.industry_rotation.core import INDUSTRIES, daily_factors, load_industry_panel, make_schedule, signal_scores
 from lib.industry_rotation.flow import infer_flow_graph
 from lib.industry_rotation.report import render_report
 from lib.industry_rotation.snapshot import build_snapshot, load_proxy
@@ -56,7 +56,7 @@ def panel_file(tmp_path):
 @pytest.fixture
 def proxy_file(tmp_path):
     rows = [{"rank": i + 1, "code": f"SW{i}", "name": f"行业{i}", "score": 5 - i} for i in range(5)]
-    payload = {"status": "public_proxy_nowcast_not_bigquant_or_wind", "as_of": "2026-09-25",
+    payload = {"status": "public_proxy_observation", "as_of": "2026-09-25",
                "windows": {str(w): {"base": rows, "composite": rows} for w in range(20, 25)}}
     path = tmp_path / "proxy.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -64,7 +64,7 @@ def proxy_file(tmp_path):
 
 
 def test_mapping_and_factor_math(panel_file):
-    days, panel, manifest = load_bigquant_panel(panel_file)
+    days, panel, manifest = load_industry_panel(panel_file)
     assert len(INDUSTRIES) == len({spec.key for spec in INDUSTRIES}) == 40
     assert manifest["complete_days"] == 40
     factors = daily_factors(days[-20:], panel)
@@ -92,22 +92,22 @@ def test_reject_bad_numbers(tmp_path, field, value):
     rows = sample_rows(1)
     rows[0][field] = value
     with pytest.raises(ValueError):
-        load_bigquant_panel(write_csv(tmp_path / "bad.csv", rows))
+        load_industry_panel(write_csv(tmp_path / "bad.csv", rows))
 
 
 def test_duplicates_and_incomplete_cross_section(tmp_path):
     rows = sample_rows(1)
     with pytest.raises(ValueError, match="重复"):
-        load_bigquant_panel(write_csv(tmp_path / "duplicate.csv", rows + [rows[0]]))
+        load_industry_panel(write_csv(tmp_path / "duplicate.csv", rows + [rows[0]]))
     with pytest.raises(ValueError, match="非完整40"):
-        load_bigquant_panel(write_csv(tmp_path / "missing.csv", rows[1:]))
+        load_industry_panel(write_csv(tmp_path / "missing.csv", rows[1:]))
 
 
 def test_l1_aggregation_uses_start_cap(tmp_path):
     rows = sample_rows(1)
     rows[0].update(float_market_cap=110, industry_return=0.1)
     extra = dict(rows[0], l2_code="EXTRA", float_market_cap=90, industry_return=-0.1)
-    days, panel, _ = load_bigquant_panel(write_csv(tmp_path / "aggregate.csv", rows + [extra]))
+    days, panel, _ = load_industry_panel(write_csv(tmp_path / "aggregate.csv", rows + [extra]))
     assert panel[days[0]][INDUSTRIES[0].key].daily_return == pytest.approx(0)
 
 
@@ -181,7 +181,7 @@ def test_html_escapes_external_names_and_cli_outputs(panel_file, proxy_file, tmp
     assert "&lt;script&gt;" in html
     assert "https://" not in html
     output = tmp_path / "report"
-    main(["--bigquant", str(panel_file), "--as-of", "2026-09-25", "--output-dir", str(output)])
+    main(["--input-csv", str(panel_file), "--as-of", "2026-09-25", "--output-dir", str(output)])
     assert {p.name for p in output.iterdir()} == {"rotation.json", "rankings.csv", "report.html"}
     payload = json.loads((output / "rotation.json").read_text())
     assert payload["proxy"] is None
@@ -204,7 +204,7 @@ def test_input_overflow_is_rejected(tmp_path):
     rows = sample_rows(1)
     for row in rows:
         row["active_buy_amount"] = 1e308
-    days, panel, _ = load_bigquant_panel(write_csv(tmp_path / "large.csv", rows))
+    days, panel, _ = load_industry_panel(write_csv(tmp_path / "large.csv", rows))
     with pytest.raises(ValueError):
         daily_factors(days, panel)
 
@@ -214,5 +214,5 @@ def test_cli_refuses_input_overwrite(panel_file, tmp_path):
     protected.write_bytes(panel_file.read_bytes())
     before = protected.read_bytes()
     with pytest.raises(SystemExit):
-        main(["--bigquant", str(protected), "--as-of", "2026-09-25", "--output-dir", str(tmp_path)])
+        main(["--input-csv", str(protected), "--as-of", "2026-09-25", "--output-dir", str(tmp_path)])
     assert protected.read_bytes() == before

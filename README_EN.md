@@ -10,9 +10,9 @@
 [![Dimensions](https://img.shields.io/badge/Dimensions-22-brightgreen)]()
 [![Investors](https://img.shields.io/badge/Investors-66-orange)]()
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-22-red)]()
-[![Tests](https://img.shields.io/badge/Offline%20tests-973%20passed-brightgreen)](skills/deep-analysis/scripts/tests)
+[![Tests](https://img.shields.io/badge/Offline%20tests-990%20passed-brightgreen)](skills/deep-analysis/scripts/tests)
 
-**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. 66 investors × 9 schools × 22 dimensions × 22 institutional methods. Main updated 2026-11-05: industry fund-flow rotation research. Core analysis uses public sources; the optional rotation tool requires a user-supplied BigQuant CSV. Manifest version: v3.9.4.**
+**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. 66 investors × 9 schools × 22 dimensions × 22 institutional methods. Main updated 2026-11-05: industry fund-flow rotation research. Core analysis uses public sources; the optional rotation tool requires a user-supplied local CSV. Manifest version: v3.9.4.**
 
 [Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-66-investor-jury) · [Methods](#-22-institutional-methods) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq) · [QQ Group](#qq-group)
 
@@ -37,10 +37,12 @@ Offline regression results do not verify live data availability or investment pe
 ### Industry Fund-Flow Rotation
 
 ```bash
-python3 rotate.py --bigquant /path/to/citic_industry_fund_flow.csv --as-of 2026-11-04
+python3 rotate.py --input-csv /path/to/citic_industry_fund_flow.csv --as-of 2026-11-04
 ```
 
 Uses Python's standard library. Produces dated HTML, JSON and CSV with base and approximate five-factor rankings, W20–24 common selections, and last confirmed weekly model targets. Optional `--proxy-json` imports a dated Shenwan30 observation from the source research tool; it never enters the formal CITIC40 calculation. No live data download, backtest-return claims, ETF mapping or order execution. Existing stock analysis and screening gates are unchanged. See the [data contract and limitations](docs/industry-rotation.md).
+
+The tool is provider-neutral and local-only. Real rotation inputs, rankings, model holdings, reports, screenshots and archives must not be uploaded to GitHub, releases, hosted pages or distributed skill packages. The repository ships code and synthetic tests only. Run `python3 skills/deep-analysis/scripts/lib/industry_rotation/privacy.py` before publication; CI repeats this check but cannot prevent an upload that has already occurred.
 
 ## 🌏 Why Western Investors Should Care
 

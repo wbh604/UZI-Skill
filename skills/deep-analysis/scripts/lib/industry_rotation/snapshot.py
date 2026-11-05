@@ -7,7 +7,7 @@ import math
 from datetime import date
 from pathlib import Path
 
-from .core import INDUSTRIES, daily_factors, load_bigquant_panel, make_schedule, signal_scores
+from .core import INDUSTRIES, daily_factors, load_industry_panel, make_schedule, signal_scores
 
 WINDOWS = tuple(range(20, 25))
 NAMES = {item.key: item.name for item in INDUSTRIES}
@@ -29,14 +29,14 @@ def common_core(windows, variant):
 
 
 def load_proxy(path: Path, as_of: date):
-    """Accept the source project's dated JSON, not arbitrary scores or HTML."""
+    """Accept the documented local observation schema, not arbitrary HTML."""
     if path.stat().st_size > 2 * 1024 * 1024:
         raise ValueError("临时观察 JSON 不能超过 2 MiB")
     raw = path.read_bytes()
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("临时观察 JSON 顶层必须为对象")
-    if payload.get("status") != "public_proxy_nowcast_not_bigquant_or_wind":
+    if payload.get("status") != "public_proxy_observation":
         raise ValueError("临时观察口径不匹配")
     proxy_day = date.fromisoformat(payload["as_of"])
     if proxy_day > as_of:
@@ -81,7 +81,7 @@ def load_proxy(path: Path, as_of: date):
 
 
 def build_snapshot(path: Path, as_of: date, proxy_path: Path | None = None):
-    days, panel, manifest = load_bigquant_panel(path, as_of=as_of)
+    days, panel, manifest = load_industry_panel(path, as_of=as_of)
     if len(days) < max(WINDOWS) + 1:
         raise ValueError("至少需要25个完整交易日，以计算全部窗口及前一日变化")
     # Only the latest and previous weekly signal are needed, not a full backtest.
@@ -125,7 +125,7 @@ def build_snapshot(path: Path, as_of: date, proxy_path: Path | None = None):
         "as_of": as_of.isoformat(),
         "execution_status": "observation_only",
         "formal": {
-            "source": "用户提供的 BigQuant CSV；数据授权由提供者负责",
+            "source": "用户提供的本地 CSV；数据授权由提供者负责，禁止公开分发",
             "universe": "中信40行业（一级聚合 + 指定二级）",
             "data_date": days[-1].isoformat(),
             "previous_data_date": days[-2].isoformat(),

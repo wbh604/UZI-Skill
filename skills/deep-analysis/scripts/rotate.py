@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""行业资金流轮动：BigQuant 中信40正式排名 + 可选申万30独立观察。"""
+"""行业资金流轮动：本地 CSV 中信40正式排名 + 可选申万30独立观察。"""
 from __future__ import annotations
 
 import argparse
@@ -14,20 +14,20 @@ from lib.industry_rotation.report import render_report
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bigquant", type=Path, required=True, help="主动买卖额原始CSV（不随技能分发）")
+    parser.add_argument("--input-csv", type=Path, required=True, help="主动买卖额原始CSV（不随技能分发）")
     parser.add_argument("--as-of", type=date.fromisoformat, required=True, help="研究截止日 YYYY-MM-DD")
-    parser.add_argument("--proxy-json", type=Path, help="可选：原策略 today_proxy 日期快照；仅观察")
+    parser.add_argument("--proxy-json", type=Path, help="可选：符合代理观察契约的本地日期快照")
     parser.add_argument("--output-dir", type=Path, help="结果目录，默认 scripts/reports/rotation/<截止日>")
     args = parser.parse_args(argv)
     if args.as_of > date.today():
         parser.error("--as-of 不能晚于今天")
     output = args.output_dir or Path(__file__).resolve().parent / "reports" / "rotation" / str(args.as_of)
     outputs = [output / name for name in ("rotation.json", "rankings.csv", "report.html")]
-    inputs = {path.resolve() for path in (args.bigquant, args.proxy_json) if path}
+    inputs = {path.resolve() for path in (args.input_csv, args.proxy_json) if path}
     if any(path.resolve() in inputs for path in outputs):
         parser.error("输出路径不得覆盖输入文件")
     try:
-        result = build_snapshot(args.bigquant, args.as_of, args.proxy_json)
+        result = build_snapshot(args.input_csv, args.as_of, args.proxy_json)
         json_text = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)
         report = render_report(result)
         output.mkdir(parents=True, exist_ok=True)

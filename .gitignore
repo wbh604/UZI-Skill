@@ -50,5 +50,22 @@ docs/screenshots/full-page.png
 docs/wechat-article.md
 docs/*.local.md
 
+# Industry rotation inputs and derived results are strictly local-only.
+.private/
+**/data/rotation/
+**/data/industry_rotation/
+**/industry_fund_flow_rotation*/
+**/citic_industry_fund_flow*
+**/sector_fund_flow*.csv*
+**/stock_fund_flow*.csv*
+**/today_proxy_*
+**/rotation.json
+**/rankings.csv
+**/*rotation*.html
+**/*rotation*.png
+**/*rotation*.jpg
+**/*rotation*.zip
+**/*rotation*.csv*
+
 # v2.10.2 · prewarm_cache 生成的预热数据（release 附件，不进 repo）
 skills/deep-analysis/scripts/prewarm/

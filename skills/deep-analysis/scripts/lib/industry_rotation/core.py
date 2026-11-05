@@ -1,4 +1,4 @@
-"""CITIC 40-industry factors ported from the user-owned allw_lbw research.
+"""CITIC 40-industry factors ported from a local research implementation.
 
 No source data, credentials or backtest-performance claims are bundled.
 """
@@ -89,7 +89,7 @@ def _finite_float(value: str) -> float:
     return number
 
 
-def load_bigquant_panel(
+def load_industry_panel(
     path: Path,
     as_of: date | None = None,
 ) -> tuple[list[date], dict[date, dict[str, IndustryDay]], dict[str, object]]:
@@ -118,7 +118,7 @@ def load_bigquant_panel(
             "industry_return",
         }
         if not reader.fieldnames or not expected.issubset(reader.fieldnames):
-            raise ValueError(f"BigQuant 文件缺少字段：{sorted(expected - set(reader.fieldnames or []))}")
+            raise ValueError(f"输入 CSV 缺少字段：{sorted(expected - set(reader.fieldnames or []))}")
         for row in reader:
             rows += 1
             day = date.fromisoformat(row["date"])
@@ -178,7 +178,7 @@ def load_bigquant_panel(
         }
 
     if not panel:
-        raise ValueError("BigQuant 数据无法形成完整的 40 行业面板")
+        raise ValueError("输入 CSV 无法形成完整的 40 行业面板")
     days = sorted(panel)
     sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
     manifest = {

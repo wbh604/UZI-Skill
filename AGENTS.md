@@ -2,6 +2,10 @@
 
 > 本文件供 Codex / Claude Code / Cursor / Devin / OpenCode / Gemini 等 AI agent 自动读取。
 
+## 轮动数据发布边界
+
+行业轮动工具仅发布算法、数据契约和合成测试。真实输入、资金流明细、排名、模型持仓、报告、截图及包含它们的压缩包只保存在本地，不得上传 GitHub、Issue/PR 附件、Release、公开页面或技能包，也不得复制进公开文档。不要绕过忽略规则。提交或发布前运行 `python3 skills/deep-analysis/scripts/lib/industry_rotation/privacy.py` 检查 Git 索引，并人工核对提交清单；CI 检查不是上传前防护。不要删除用户本地数据。
+
 ---
 
 ## 🗺️ Repository Layout & Entrypoints (v3.2.0)
