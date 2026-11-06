@@ -27,6 +27,102 @@ def _safe(fn, default):
         return {"error": str(e)} if isinstance(default, dict) else default
 
 
+# --- 主力资金：东财 push2his 不可达时的备用源 -------------------------------
+# 东财 ak.stock_individual_fund_flow 打的是 push2his.eastmoney.com。
+# 该域在部分网络环境（公司代理 / 运营商）会被直接 RST，且 fetch_capital_flow
+# 原本用 _safe(..., []) 把异常吞成 []，导致 main_fund_flow_20d 静默为空、
+# 又不带 error，self_review 会把它当 critical 卡死报告。
+# 新浪的同口径数据（超大单 + 大单 = 主力）稳定可用，作为二级源。
+_SINA_FLOW_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "MoneyFlow.ssl_qsfx_zjlrqs?page=1&num=25&sort=opendate&asc=0&daima={sym}"
+)
+_SINA_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://finance.sina.com.cn/",
+}
+
+
+def _sina_symbol(ti) -> str:
+    code = ti.code
+    prefix = "sz" if ti.full.upper().endswith(".SZ") else "sh"
+    return f"{prefix}{code}"
+
+
+def _fetch_main_flow(ti, limit: int = 20):
+    """主力资金：东财优先，失败/空则回退新浪。
+
+    返 (records, source, error)。三个都返回，让调用方能区分
+    「真的没有资金流数据」和「抓取失败被吞成 []」——
+    后者会让 self_review 误判为 critical 并阻断报告。
+    """
+    errors = []
+
+    try:
+        df = ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower())
+        records = df.tail(limit).to_dict("records") if df is not None and len(df) else []
+        if records:
+            return records, "akshare:eastmoney", None
+        errors.append("eastmoney: empty result")
+    except Exception as e:  # noqa: BLE001 - 上游可能抛任意网络/解析异常
+        errors.append(f"eastmoney: {type(e).__name__}: {e}")
+
+    try:
+        records = _sina_main_flow(ti, limit=limit)
+        if records:
+            return records, "sina:MoneyFlow.ssl_qsfx_zjlrqs", "; ".join(errors) or None
+        errors.append("sina: empty result")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"sina: {type(e).__name__}: {e}")
+
+    return [], None, "; ".join(errors)
+
+
+def _sina_main_flow(ti, limit: int = 20) -> list[dict]:
+    """新浪主力资金流水 → 东财字段名（供 score_fns 直接消费）。
+
+    新浪 r0=超大单 r1=大单 r2=中单 r3=小单（单位元，正数=净流入）。
+    东财「主力净流入-净额」= 超大单 + 大单，两者口径一致。
+    """
+    import urllib.request
+
+    url = _SINA_FLOW_URL.format(sym=_sina_symbol(ti))
+    req = urllib.request.Request(url, headers=_SINA_HEADERS)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        raw = resp.read().decode("utf-8", "replace").strip()
+    if not raw or raw in ("null", "[]"):
+        return []
+    rows = json.loads(raw)
+    if not isinstance(rows, list):
+        return []
+
+    def _f(rec, key):
+        try:
+            return float(rec.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    out = []
+    for rec in rows[:limit]:
+        main_net = _f(rec, "r0_net") + _f(rec, "r1_net")
+        turnover = _f(rec, "turnover")
+        out.append({
+            "日期": rec.get("opendate"),
+            "收盘价": _f(rec, "trade"),
+            "涨跌幅": _f(rec, "changeratio") * 100,
+            "主力净流入-净额": main_net,
+            "主力净流入-净占比": (main_net / turnover * 100) if turnover else 0.0,
+            "超大单净流入-净额": _f(rec, "r0_net"),
+            "大单净流入-净额": _f(rec, "r1_net"),
+            "中单净流入-净额": _f(rec, "r2_net"),
+            "小单净流入-净额": _f(rec, "r3_net"),
+        })
+    return out
+
+
 # v2.15.3 · 大宗/解禁数据按年缓存（TTL 24h · 数据日频更新）
 # 不缓存会每只股花 3+min 重拉 · 严重性能 bug
 _UNIVERSE_TTL = 24 * 3600  # 24h
@@ -140,10 +236,7 @@ def main(ticker: str) -> dict:
         [],
     )
 
-    main_flow = _safe(
-        lambda: ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower()).tail(20).to_dict("records"),
-        [],
-    )
+    main_flow, main_flow_source, main_flow_error = _fetch_main_flow(ti)
 
     # 大宗交易 · v2.15.3 · 走 universe cache · 只 filter 本股（原每次 3+min 重抓全 A）
     try:
@@ -267,12 +360,15 @@ def main(ticker: str) -> dict:
             "main_fund_flow_20d": main_flow,
             "main_20d": _main_sum_20d(main_flow),
             "main_5d": "—",
+            "main_flow_source": main_flow_source,
+            "main_flow_error": main_flow_error,
             "block_trades_recent": block_trades,
             "unlock_recent": unlock,
             "unlock_schedule": unlock_schedule,
             "institutional_history": inst_history,
         },
-        "source": "akshare:multi (north + margin + gdhs + fund_flow + dzjy + restricted_release + fund_hold_detail)",
+        "source": "akshare:multi (north + margin + gdhs + fund_flow + dzjy + restricted_release + fund_hold_detail)"
+                  + (f" · main_flow={main_flow_source}" if main_flow_source else ""),
         "fallback": False,
     }
 
