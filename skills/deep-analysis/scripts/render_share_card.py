@@ -1,7 +1,8 @@
 """Render the 1080×1920 share-card PNG by Playwright-screenshotting #share-card.
 
 Usage: python scripts/render_share_card.py {ticker}
-Requires: pip install playwright && playwright install chromium
+Requires: pip install playwright
+          + 系统 Chrome/Edge（复用本机浏览器），或 playwright install chromium
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ except ImportError:
     print("[!] playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)
 
+from lib.browser_locator import browser_launch_kwargs
+
 
 def render(ticker: str, selector: str = "#share-card", out_name: str = "share-card.png", scale: int = 2) -> Path:
     date = datetime.now().strftime("%Y%m%d")
@@ -26,7 +29,7 @@ def render(ticker: str, selector: str = "#share-card", out_name: str = "share-ca
     out_path = report_dir / out_name
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(**browser_launch_kwargs())
         ctx = browser.new_context(device_scale_factor=scale, viewport={"width": 1280, "height": 800})
         page = ctx.new_page()
         page.goto(f"file:///{html_path.resolve().as_posix()}")
