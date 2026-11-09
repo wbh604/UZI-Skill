@@ -23,7 +23,7 @@ A 股 / 港股 / 美股 · 个股深度分析引擎 · **66 位评审团 × 9 �
 
 [安装](#安装) · [用法](#用法) · [三档深度](#-三档思考深度v2103-新增) · [Hermes 🆕](INSTALL-HERMES.md) · [评审团](#-66-位评审团) · [Serenity 🆕](#-i-组--serenity--ai-卡位瓶颈猎手) · [机构方法](#-22-种机构级方法) · [自查 gate](#-机械级自查-gatev29-起) · [报告截图](#-报告长什么样) · [FAQ](#-faq) · [QQ 交流群](#qq-group) · [Contributors](CONTRIBUTORS.md)
 
-**中文** | [English](README_EN.md)
+**中文** | [English](README_EN.md) | [日本語](README_JA.md)
 
 </div>
 

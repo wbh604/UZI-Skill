@@ -16,7 +16,7 @@
 
 [Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-66-investor-jury) · [Methods](#-22-institutional-methods) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq) · [QQ Group](#qq-group)
 
-**English** | [中文](README.md)
+**English** | [中文](README.md) | [日本語](README_JA.md)
 
 </div>
 
