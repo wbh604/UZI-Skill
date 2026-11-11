@@ -1,3 +1,17 @@
+<a id="workbuddy"></a>
+
+# UZI-Skill Is Now Available on WorkBuddy
+
+**Welcome to UZI-Skill on WorkBuddy!** Explore 66 investor-style perspectives across 9 schools, combining quantitative screening with role-based analysis, stock research, global peer comparisons, and HTML reports with portraits and charts.
+
+Scan the mini-program code below with WeChat to view the skill details. Click the image for the full-size version.
+
+<p align="center">
+  <a href="docs/screenshots/workbuddy-skill-share.png"><img src="docs/screenshots/workbuddy-skill-share.png" width="400" alt="UZI-Skill on WorkBuddy: scan with WeChat to view skill details" /></a>
+</p>
+
+---
+
 <div align="center">
 
 # 游资 (UZI) Skills
