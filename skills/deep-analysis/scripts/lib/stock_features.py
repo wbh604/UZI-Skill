@@ -314,20 +314,7 @@ def extract_features(raw: dict, dims: dict) -> dict:
     f["industry_in_decline"] = "衰退" in f["industry_lifecycle"]
 
     # ─────────────── CAPITAL FLOW ───────────────
-    # v2.2: 主力资金替代北向（北向已关停）
-    _main_flow = capital.get("main_fund_flow_20d") or []
-    _main_5d_net = 0
-    if _main_flow:
-        for _rec in _main_flow[:5]:
-            try:
-                _main_5d_net += float((_rec.get("主力净流入-净额", 0) if isinstance(_rec, dict) else 0) or 0)
-            except (ValueError, TypeError):
-                pass
-    f["main_fund_5d_net_yi"] = round(_main_5d_net / 1e8, 2)
-    f["main_fund_net_positive"] = _main_5d_net > 0
-    # 保留兼容旧名 (一些 investor_criteria 规则可能引用)
-    f["northbound_20d_yi"] = f["main_fund_5d_net_yi"]
-    f["northbound_net_positive"] = f["main_fund_net_positive"]
+    # Main-flow features are assigned once in apply_feature_evidence.
     f["margin_trend"] = str(capital.get("margin_trend", "—"))
     f["holders_trend"] = str(capital.get("holders_trend", "—"))
     f["holders_concentrating"] = "降" in f["holders_trend"]  # 户数下降 = 筹码集中

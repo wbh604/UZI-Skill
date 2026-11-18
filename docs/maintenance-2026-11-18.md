@@ -22,7 +22,9 @@ export UZI_BROWSER_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 
 自定义浏览器版本与 Playwright 之间仍可能不兼容，不能承诺任意本地版本均可运行。参考 [Playwright 官方启动参数](https://playwright.dev/python/docs/api/class-browsertype#browser-type-launch-option-executable-path)。
 
-## 暂缓接入
+## 当次暂缓接入
+
+后续处理见[资金流来源与统计口径](capital-flow-sources.md)和[日文 README](../README_JA.md)。以下保留原审核记录。
 
 - [PR #124](https://github.com/wbh604/UZI-Skill/pull/124)：新浪资金流 fallback 方向可取，但当前实现把缺失、非法字段转成 0，可能制造有效零值；非 SZ 一律映射 SH，可能错查北交所；新浪与东财的分类阈值和单位不能仅凭字段名认定完全一致。需补齐字段有效性、市场白名单、日期排序与去重、单位和来源口径验证，再接入评分链。当前工作区未启用此备用源。
 - [PR #126](https://github.com/wbh604/UZI-Skill/pull/126)：日文入口有价值，但正文仍有旧评委人数、过时架构与测试数量，以及对联网和输出可靠性的过强描述。需与当前中文文档同步后再发布，避免新增一份过时使用指南。当前工作区未新增日文 README。

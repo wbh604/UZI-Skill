@@ -12,11 +12,17 @@
 v2.15.3 (#30) · 大宗交易 + 解禁数据走 ds.cached module-level · 避免每只股重抓全 A 数据（原每次 3+min，改后首次 3min 后续 < 1s）.
 """
 import json
+import re
 import sys
+from datetime import datetime, timedelta, timezone
+from http.client import HTTPException
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
 from lib.cache import cached  # v2.15.3 · TTL cache
+from lib.capital_flow_history import MAIN_NET, net_amount, recent_history, window_net
 from lib.market_router import parse_ticker
 
 
@@ -25,6 +31,93 @@ def _safe(fn, default):
         return fn()
     except Exception as e:
         return {"error": str(e)} if isinstance(default, dict) else default
+
+
+_SINA_FLOW_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "MoneyFlow.ssl_qsfx_lscjfb"
+)
+_SINA_SOURCE = "sina:MoneyFlow.ssl_qsfx_lscjfb"
+_EM_SOURCE = "akshare:eastmoney"
+_CHINA_TZ = timezone(timedelta(hours=8))
+_MAX_SINA_BYTES = 128 * 1024
+
+
+def _fetch_sina_observation(symbol, today) -> dict:
+    query = urlencode({"page": 1, "num": 25, "sort": "opendate", "asc": 0, "daima": symbol})
+    request = Request(f"{_SINA_FLOW_URL}?{query}", headers={
+        "Referer": "https://finance.sina.com.cn/", "User-Agent": "Mozilla/5.0",
+    })
+    with urlopen(request, timeout=8) as response:
+        payload = response.read(_MAX_SINA_BYTES + 1)
+    if len(payload) > _MAX_SINA_BYTES:
+        raise ValueError("Sina response exceeds the size limit")
+    rows = json.loads(payload)
+    if not isinstance(rows, list):
+        raise ValueError("Sina response is not a historical row list")
+
+    normalized = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        block = net_amount(row.get("r0_net"))
+        large = net_amount(row.get("r1_net"))
+        normalized.append({
+            "date": row.get("opendate"),
+            "large_order_net_cny": net_amount(block + large) if block is not None and large is not None else None,
+        })
+    rows = recent_history(normalized, date_key="date", amount_key="large_order_net_cny",
+                          through=today - timedelta(days=1))
+    latest = next((row["date"] for row in rows if row["large_order_net_cny"] is not None), None)
+    if latest is None or latest < (today - timedelta(days=14)).isoformat():
+        raise ValueError("No recent valid Sina history")
+    return {
+        "source": _SINA_SOURCE,
+        "currency": "CNY",
+        "unit": "yuan",
+        "latest_valid_date": latest,
+        "rows": rows,
+        "net_5_rows_cny": window_net(rows, 5, "large_order_net_cny"),
+        "net_20_rows_cny": window_net(rows, 20, "large_order_net_cny"),
+    }
+
+
+def _fetch_main_flow(ti, today=None) -> dict:
+    today = today or datetime.now(_CHINA_TZ).date()
+    result = {
+        "main_fund_flow_20d": [],
+        "main_flow_source": None,
+        "main_flow_error": None,
+        "sina_flow_observation": None,
+        "sina_flow_error": None,
+    }
+    if (ti.market != "A" or ti.exchange not in {"SH", "SZ", "BJ"}
+            or not re.fullmatch(r"[0-9]{6}", ti.code)
+            or parse_ticker(ti.code).exchange != ti.exchange):
+        result["main_flow_error"] = "Unsupported or inconsistent A-share symbol"
+        return result
+
+    exchange = ti.exchange.lower()
+    try:
+        frame = ak.stock_individual_fund_flow(stock=ti.code, market=exchange)
+        records = frame.to_dict("records") if frame is not None else []
+        rows = recent_history(records, date_key="日期", amount_key=MAIN_NET, through=today)
+    except Exception as exc:
+        result["main_flow_error"] = f"Eastmoney fetch failed ({type(exc).__name__})"
+    else:
+        latest = next((row["日期"] for row in rows if row[MAIN_NET] is not None), None)
+        if latest is not None and latest >= (today - timedelta(days=14)).isoformat():
+            result.update(main_fund_flow_20d=rows, main_flow_source=_EM_SOURCE)
+            return result
+        result["main_flow_error"] = "Eastmoney returned no recent valid main-flow history"
+
+    try:
+        result["sina_flow_observation"] = _fetch_sina_observation(f"{exchange}{ti.code}", today)
+    except (OSError, ValueError, HTTPException) as exc:
+        result["sina_flow_error"] = (
+            f"Sina observation unavailable ({type(exc).__name__})"
+        )
+    return result
 
 
 # v2.15.3 · 大宗/解禁数据按年缓存（TTL 24h · 数据日频更新）
@@ -140,10 +233,7 @@ def main(ticker: str) -> dict:
         [],
     )
 
-    main_flow = _safe(
-        lambda: ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower()).tail(20).to_dict("records"),
-        [],
-    )
+    flow_data = _fetch_main_flow(ti)
 
     # 大宗交易 · v2.15.3 · 走 universe cache · 只 filter 本股（原每次 3+min 重抓全 A）
     try:
@@ -233,14 +323,11 @@ def main(ticker: str) -> dict:
         except Exception:
             return "—"
 
-    def _main_sum_20d(flow_list):
-        if not flow_list:
+    def _main_sum(flow_list, count):
+        total = window_net(flow_list, count)
+        if total is None:
             return "—"
-        try:
-            total = sum(float(r.get("主力净流入", 0) or 0) for r in flow_list[-20:])
-            return f"{total / 1e4:+.1f}万" if abs(total) < 1e8 else f"{total / 1e8:+.1f}亿"
-        except Exception:
-            return "—"
+        return f"{total / 1e4:+.1f}万" if abs(total) < 1e8 else f"{total / 1e8:+.1f}亿"
 
     def _holders_trend(h):
         if not h or len(h) < 2:
@@ -264,9 +351,9 @@ def main(ticker: str) -> dict:
             "margin_trend": f"近 5 日 {len(margin)} 条记录" if margin else "—",
             "holder_count_history": holders,
             "holders_trend": _holders_trend(holders),
-            "main_fund_flow_20d": main_flow,
-            "main_20d": _main_sum_20d(main_flow),
-            "main_5d": "—",
+            **flow_data,
+            "main_20d": _main_sum(flow_data["main_fund_flow_20d"], 20),
+            "main_5d": _main_sum(flow_data["main_fund_flow_20d"], 5),
             "block_trades_recent": block_trades,
             "unlock_recent": unlock,
             "unlock_schedule": unlock_schedule,

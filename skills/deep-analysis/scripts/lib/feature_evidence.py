@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from lib.capital_flow_history import window_net
+
 
 def apply_feature_evidence(f: dict, raw: dict) -> dict:
     from lib.stock_features import _f, _market_cap_to_yi
@@ -171,9 +173,7 @@ def apply_feature_evidence(f: dict, raw: dict) -> dict:
         f["ai_chokepoint_score"] = None
     f["ai_score_is_heuristic"] = True
 
-    flow = capital.get("main_fund_flow_20d") or []
-    values = [_f(row.get("主力净流入-净额"), None) if isinstance(row, dict) else None for row in flow[:5]]
-    net = sum(values) if len(values) == 5 and all(v is not None for v in values) else None
+    net = window_net(capital.get("main_fund_flow_20d"), 5)
     f["main_fund_5d_net_yi"] = round(net / 1e8, 2) if net is not None else None
     f["main_fund_net_positive"] = net > 0 if net is not None else None
     f["northbound_20d_yi"] = f["main_fund_5d_net_yi"]

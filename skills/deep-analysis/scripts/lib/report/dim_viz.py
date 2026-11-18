@@ -18,6 +18,7 @@ assemble_report.py 做 `from lib.report.dim_viz import *` · 所有历史引用�
 """
 from __future__ import annotations
 
+from lib.capital_flow_history import MAIN_NET, net_amount, trading_date, window_net
 from lib.report.global_peers import render_global_peer_comparison
 from lib.report.svg_primitives import (
     COLOR_BULL, COLOR_BEAR, COLOR_GOLD, COLOR_CYAN,
@@ -512,12 +513,12 @@ def _viz_capital_flow(raw: dict) -> str:
 </div>'''
     # 北向已关停，用主力资金流向替代
     main_flow = raw.get("main_fund_flow_20d") or []
-    main_values = [abs(float(r.get("主力净流入-净额", 0))) for r in main_flow[:20] if isinstance(r, dict)] if isinstance(main_flow, list) else []
-    main_5d_summary = raw.get("main_5d", "—")
-    if main_5d_summary == "—" and main_flow and isinstance(main_flow, list):
-        recent = main_flow[:5]
-        net = sum(float(r.get("主力净流入-净额", 0)) for r in recent if isinstance(r, dict))
-        main_5d_summary = f"{'净流入' if net > 0 else '净流出'} {abs(net)/1e8:.1f}亿" if abs(net) > 0 else "—"
+    main_values = [net_amount(row.get(MAIN_NET)) if isinstance(row, dict) else None
+                   for row in main_flow[:20]] if isinstance(main_flow, list) else []
+    net = window_net(main_flow, 5)
+    main_5d_summary = f"近 5 日净额 {net / 1e8:+.2f}亿元" if net is not None else "近 5 日数据暂缺"
+    if any(value is None for value in main_values):
+        main_values = []
 
     # 大宗交易
     block = raw.get("block_trades_recent") or []
@@ -526,12 +527,27 @@ def _viz_capital_flow(raw: dict) -> str:
     holders_hist = raw.get("holder_count_history") or []
     holders_vals = [r.get("股东户数-本次", 0) for r in holders_hist[:10] if isinstance(r, dict)] if isinstance(holders_hist, list) else []
 
-    north = _mini("主力资金 20日", main_values, main_5d_summary, COLOR_CYAN)
+    north = _mini("东财主力资金（日线）", main_values[::-1], main_5d_summary, COLOR_CYAN)
     margin = _mini("大宗交易", [], block_summary, COLOR_BLUE)
     holders = _mini("股东户数", holders_vals, raw.get("holders_trend", "—"), COLOR_GOLD)
     main = _mini("融资余额", [], raw.get("margin_trend", "—") if raw.get("margin_trend") != "—" else "数据暂缺", COLOR_MUTED)
 
     viz = f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">{north}{margin}{holders}{main}</div>'
+    observation = raw.get("sina_flow_observation")
+    if isinstance(observation, dict) and (day := trading_date(observation.get("latest_valid_date"))):
+        windows = []
+        for count in (5, 20):
+            total = net_amount(observation.get(f"net_{count}_rows_cny"))
+            windows.append(f"近 {count} 条净额 {total / 1e8:+.2f} 亿元" if total is not None
+                           else f"近 {count} 条净额数据不足")
+        rows = observation.get("rows") or []
+        latest_net = next((net_amount(row.get("large_order_net_cny"))
+                           for row in rows if isinstance(row, dict) and row.get("date") == day.isoformat()), None)
+        latest = f"{day} 净额 {latest_net / 1e8:+.2f} 亿元" if latest_net is not None else str(day)
+        detail = " · ".join([latest, *windows])
+        viz += _mini("新浪历史成交分布（仅观察，不参与评分）", [], detail, COLOR_MUTED)
+    elif raw.get("main_flow_error"):
+        viz += _mini("东财主力资金暂缺", [], "暂无可用备用观察数据", COLOR_MUTED)
 
     # Institutional holdings over 8 quarters
     inst = raw.get("institutional_history", {})

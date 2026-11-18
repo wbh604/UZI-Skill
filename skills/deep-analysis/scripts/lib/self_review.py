@@ -144,6 +144,13 @@ def check_empty_dims(ctx: dict) -> list[Issue]:
             except ValueError:
                 pass
         data = v.get("data")
+        if k == "12_capital_flow" and isinstance(data, dict) and data.get("main_flow_error"):
+            issues.append(Issue(
+                severity="warning", category="data", dim=k,
+                issue="东财主力资金数据暂缺；新浪观察不作为评分依据",
+                evidence=str(data["main_flow_error"])[:100],
+                suggested_fix="检查东财资金流数据源，不要用跨源观测替代评分输入",
+            ))
         if data in (None, {}, []):
             # 区分是 timeout 还是真空
             is_timeout = bool(v.get("_timeout"))

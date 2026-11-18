@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from lib.panel_status import summarize_abstentions
 from lib.panel_evidence import merge_investor_overrides, normalize_abstention
+from lib.capital_flow_history import window_net
 
 import json
 import os
@@ -200,26 +201,20 @@ def score_dimensions(raw: dict) -> dict:
 
     # 12 · 资金面 (v2.2: 主力资金替代北向，北向已关停)
     cap = _get("12_capital_flow")
-    main_flow = cap.get("main_fund_flow_20d") or []
-    main_5d_net = 0
-    if main_flow:
-        for rec in main_flow[:5]:
-            v = rec.get("主力净流入-净额", 0) if isinstance(rec, dict) else 0
-            try:
-                main_5d_net += float(v)
-            except (ValueError, TypeError):
-                pass
-    main_5d_label = f"{main_5d_net / 1e8:+.1f}亿" if main_5d_net else "—"
+    main_5d_net = window_net(cap.get("main_fund_flow_20d"), 5)
+    buying = main_5d_net is not None and main_5d_net > 0
+    selling = main_5d_net is not None and main_5d_net < 0
+    main_5d_label = f"{main_5d_net / 1e8:+.2f}亿" if main_5d_net is not None else "数据暂缺"
     unlock = cap.get("unlock_schedule") or []
     score_12 = 5
-    if main_5d_net > 0: score_12 += 2
-    elif main_5d_net < 0: score_12 -= 1
+    if buying: score_12 += 2
+    elif selling: score_12 -= 1
     if len(unlock) == 0: score_12 += 1
     score_12 = max(1, min(10, score_12))
     out["12_capital_flow"] = {"score": score_12, "weight": 4,
                                "label": f"主力 5日 {main_5d_label} · 12 个月解禁 {len(unlock)} 次",
-                               "reasons_pass": [f"主力资金 5 日净流入 {main_5d_label}"] if main_5d_net > 0 else [],
-                               "reasons_fail": [f"主力资金 5 日净流出 {main_5d_label}"] if main_5d_net < 0 else []}
+                               "reasons_pass": [f"主力资金 5 日净流入 {main_5d_label}"] if buying else [],
+                               "reasons_fail": [f"主力资金 5 日净流出 {main_5d_label}"] if selling else []}
 
     # 13 · 政策
     out["13_policy"] = {"score": 6, "weight": 3, "label": "政策环境中性"}
