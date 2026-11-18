@@ -47,19 +47,21 @@ def recent_history(rows, *, date_key: str, amount_key: str, through: date, limit
     return [by_date[day] for day in sorted(by_date, reverse=True)[:limit]]
 
 
+def recent_main_history(rows, limit: int = 20) -> list:
+    if not isinstance(rows, list) or not rows:
+        return []
+    # New and old caches from AkShare may differ in row order.
+    days = [trading_date(row.get("日期")) if isinstance(row, dict) else None for row in rows]
+    if all(day is not None for day in days):
+        return recent_history(rows, date_key="日期", amount_key=MAIN_NET, through=max(days), limit=limit)
+    return rows[:limit]
+
+
 def window_net(rows, count: int, amount_key: str = MAIN_NET) -> float | None:
     if not isinstance(rows, list) or len(rows) < count:
         return None
-    window = rows[:count]
-    if not all(isinstance(row, dict) for row in window):
+    window = recent_main_history(rows, count) if amount_key == MAIN_NET else rows[:count]
+    if len(window) != count or not all(isinstance(row, dict) for row in window):
         return None
-    # New and old caches from AkShare may differ in row order.
-    if amount_key == MAIN_NET:
-        days = [trading_date(row.get("日期")) for row in rows if isinstance(row, dict)]
-        if len(days) == len(rows) and all(day is not None for day in days):
-            window = recent_history(rows, date_key="日期", amount_key=amount_key,
-                                    through=max(days), limit=count)
-            if len(window) != count:
-                return None
     values = [net_amount(row.get(amount_key)) for row in window]
     return net_amount(sum(values)) if all(value is not None for value in values) else None

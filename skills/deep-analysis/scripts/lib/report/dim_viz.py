@@ -18,7 +18,7 @@ assemble_report.py 做 `from lib.report.dim_viz import *` · 所有历史引用�
 """
 from __future__ import annotations
 
-from lib.capital_flow_history import MAIN_NET, net_amount, trading_date, window_net
+from lib.capital_flow_history import MAIN_NET, net_amount, recent_main_history, trading_date, window_net
 from lib.report.global_peers import render_global_peer_comparison
 from lib.report.svg_primitives import (
     COLOR_BULL, COLOR_BEAR, COLOR_GOLD, COLOR_CYAN,
@@ -512,9 +512,9 @@ def _viz_capital_flow(raw: dict) -> str:
   {spark}
 </div>'''
     # 北向已关停，用主力资金流向替代
-    main_flow = raw.get("main_fund_flow_20d") or []
+    main_flow = recent_main_history(raw.get("main_fund_flow_20d"))
     main_values = [net_amount(row.get(MAIN_NET)) if isinstance(row, dict) else None
-                   for row in main_flow[:20]] if isinstance(main_flow, list) else []
+                   for row in main_flow]
     net = window_net(main_flow, 5)
     main_5d_summary = f"近 5 日净额 {net / 1e8:+.2f}亿元" if net is not None else "近 5 日数据暂缺"
     if any(value is None for value in main_values):

@@ -41,7 +41,7 @@ def stub_sina(monkeypatch, payload, expected="sh600519"):
 def test_eastmoney_preferred_and_recent_window_used(monkeypatch):
     days = [date(2026, 11, n) for n in (10, 11, 12, 13, 16, 17)]
     rows = [{"日期": day, MAIN_NET: value} for day, value in zip(days, [-200, 1, 2, 3, 4, 5])]
-    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", lambda **_: pd.DataFrame(rows))
+    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", lambda **_: pd.DataFrame(rows), raising=False)
     monkeypatch.setattr(fetcher, "urlopen", lambda *_, **__: pytest.fail("Unexpected fallback"))
     result = fetcher._fetch_main_flow(parse_ticker("600519.SH"), TODAY)
     assert result["main_flow_source"] == "akshare:eastmoney"
@@ -50,11 +50,25 @@ def test_eastmoney_preferred_and_recent_window_used(monkeypatch):
     assert window_net(rows, 5) == 15  # Pre-update cache in ascending order.
 
 
+def test_renamed_akshare_endpoint_still_uses_eastmoney_first(monkeypatch):
+    monkeypatch.delattr(fetcher.ak, "stock_individual_fund_flow", raising=False)
+
+    def new_endpoint(*, symbol, market):
+        assert (symbol, market) == ("920001", "bj")
+        return pd.DataFrame([{"日期": "2026-11-17", MAIN_NET: 0.0}])
+
+    monkeypatch.setattr(fetcher.ak, "stock_fund_flow_individual_hist_em", new_endpoint, raising=False)
+    monkeypatch.setattr(fetcher, "urlopen", lambda *_, **__: pytest.fail("Unexpected fallback"))
+    result = fetcher._fetch_main_flow(parse_ticker("920001.BJ"), TODAY)
+    assert result["main_flow_source"] == "akshare:eastmoney"
+    assert result["main_fund_flow_20d"][0][MAIN_NET] == 0
+
+
 @pytest.mark.parametrize(("ticker", "symbol"), [
     ("600519.SH", "sh600519"), ("301377.SZ", "sz301377"), ("920001.BJ", "bj920001"),
 ])
 def test_sina_observation_uses_exchange_and_not_turnover(monkeypatch, ticker, symbol):
-    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", lambda **_: pd.DataFrame())
+    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", lambda **_: pd.DataFrame(), raising=False)
     stub_sina(monkeypatch, [
         sina_row("2026-11-13"),
         sina_row("2026-11-18"),
@@ -96,7 +110,7 @@ def test_conflicting_duplicate_invalidates_window_but_not_observation(monkeypatc
 def test_two_source_failures_report_missing_without_fake_zero(monkeypatch, payload):
     def fail(**_):
         raise ConnectionError("synthetic outage")
-    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", fail)
+    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", fail, raising=False)
     stub_sina(monkeypatch, payload)
     result = fetcher._fetch_main_flow(parse_ticker("600519.SH"), TODAY)
     assert result["main_flow_error"] == "Eastmoney fetch failed (ConnectionError)"
@@ -106,7 +120,7 @@ def test_two_source_failures_report_missing_without_fake_zero(monkeypatch, paylo
 
 
 def test_inconsistent_exchange_is_rejected_without_network(monkeypatch):
-    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", lambda **_: pytest.fail("Unexpected fetch"))
+    monkeypatch.setattr(fetcher.ak, "stock_individual_fund_flow", lambda **_: pytest.fail("Unexpected fetch"), raising=False)
     monkeypatch.setattr(fetcher, "urlopen", lambda *_, **__: pytest.fail("Unexpected fetch"))
     result = fetcher._fetch_main_flow(parse_ticker("000001.SH"), TODAY)
     assert "inconsistent" in result["main_flow_error"]
@@ -134,3 +148,11 @@ def test_sina_observation_visible_and_never_used_for_scoring(monkeypatch):
 @pytest.mark.parametrize("values,expected", [([0] * 5, 0), ([1] * 4, None), ([1, 2, None, 3, 4], None)])
 def test_window_requires_complete_finite_values(values, expected):
     assert window_net([{MAIN_NET: value} for value in values], 5) == expected
+
+
+def test_report_chart_is_identical_for_old_and_new_cache_order():
+    history = [{"日期": f"2026-11-{day}", MAIN_NET: amount}
+               for day, amount in zip((11, 12, 13, 16, 17), (-3, 5, -1, 10, 2))]
+    assert _viz_capital_flow({"main_fund_flow_20d": history}) == _viz_capital_flow({
+        "main_fund_flow_20d": list(reversed(history)),
+    })

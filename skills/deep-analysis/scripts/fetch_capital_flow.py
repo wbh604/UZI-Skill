@@ -99,7 +99,11 @@ def _fetch_main_flow(ti, today=None) -> dict:
 
     exchange = ti.exchange.lower()
     try:
-        frame = ak.stock_individual_fund_flow(stock=ti.code, market=exchange)
+        legacy = getattr(ak, "stock_individual_fund_flow", None)
+        if callable(legacy):
+            frame = legacy(stock=ti.code, market=exchange)
+        else:
+            frame = ak.stock_fund_flow_individual_hist_em(symbol=ti.code, market=exchange)
         records = frame.to_dict("records") if frame is not None else []
         rows = recent_history(records, date_key="日期", amount_key=MAIN_NET, through=today)
     except Exception as exc:
