@@ -32,7 +32,6 @@ from lib.investor_personas import get_comment as _persona_comment  # noqa: E402
 from lib.market_router import parse_ticker  # noqa: E402
 from lib.stock_features import extract_features, sanitize_features  # noqa: E402
 from lib.investor_evaluator import evaluate as _evaluate_investor  # noqa: E402
-from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa: E402
 
 # Fetcher registry: (module_name, dim_key, fetcher_args_fn)
 # fetcher_args_fn(ticker, raw_so_far) → args tuple for main()
@@ -59,6 +58,32 @@ FETCHER_MAP = [
     ("fetch_contests",        "19_contests",    lambda t, r: (t,)),
     ("fetch_macro",           "3_macro",        lambda t, r: (r.get("0_basic", {}).get("data", {}).get("industry", "") or "综合",)),
 ]
+
+
+def _fetch_job(module_name: str, ticker: str, dims_snapshot: dict) -> dict:
+    """Top-level legacy fetcher job; picklable for process isolation."""
+    for mod_name, _dim_key, args_fn in FETCHER_MAP:
+        if mod_name == module_name:
+            return run_fetcher(mod_name, args_fn(ticker, dims_snapshot))
+    raise KeyError(f"unknown fetcher: {module_name}")
+
+
+def _fund_holders_job(ticker: str) -> dict:
+    try:
+        import fetch_fund_holders
+        fh = fetch_fund_holders.main(ticker, limit=None)
+        return {"value": (fh.get("data") or {}).get("fund_managers", []), "error": None}
+    except Exception as exc:
+        return {"value": [], "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _similar_stocks_job(ticker: str) -> dict:
+    try:
+        import fetch_similar_stocks
+        ss = fetch_similar_stocks.main(ticker, top_n=4)
+        return {"value": (ss.get("data") or {}).get("similar_stocks", []), "error": None}
+    except Exception as exc:
+        return {"value": [], "error": f"{type(exc).__name__}: {exc}"}
 
 
 # v2.6 · mini_racer (V8 isolate) 不是 thread-safe，多线程同时初始化会触发
@@ -169,7 +194,7 @@ def run_fetcher(module_name: str, args: tuple) -> dict:
 
 
 def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> dict:
-    """Parallel fetcher execution via ThreadPoolExecutor.
+    """Parallel fetcher execution via killable child processes.
 
     Strategy: run fetch_basic first (others depend on industry etc), then
     spawn all remaining fetchers in parallel. Bonus fetchers (fund_holders,
@@ -315,14 +340,7 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
     }
     DEFAULT_PER_FETCHER_TIMEOUT = 90
 
-    def _run_one(item):
-        mod_name, dim_key, args_fn = item
-        t = time.time()
-        args = args_fn(ticker, dims)
-        result = run_fetcher(mod_name, args)
-        return dim_key, mod_name, result, time.time() - t
-
-    from concurrent.futures import TimeoutError as _FutureTimeout
+    from lib.pipeline.process_runner import ProcessJob, run_process_jobs
     # v2.6 · 增量持久化：每完成 N 个 fetcher 写一次 raw_data.json，crash/Ctrl+C 后 --resume 可续
     from lib.cache import write_task_output as _write_cache
     INCREMENTAL_SAVE_EVERY = 3
@@ -334,57 +352,46 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
         except Exception:
             pass
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_run_one, it): it for it in others}
-        # 整体 5 分钟硬上限；as_completed 内部按 future 自己 result(timeout=)
-        try:
-            for fut in as_completed(futures, timeout=300):
-                item = futures[fut]
-                _, dim_key_pending, _ = item
-                fetcher_timeout = PER_FETCHER_TIMEOUT_OVERRIDES.get(dim_key_pending, DEFAULT_PER_FETCHER_TIMEOUT)
-                try:
-                    dim_key, mod_name, result, elapsed = fut.result(timeout=fetcher_timeout)
-                    dims[dim_key] = result
-                    err = result.get("error") if isinstance(result, dict) else None
-                    has_data = bool(result.get("data")) if isinstance(result, dict) else False
-                    status = "✗" if err else ("✓" if has_data else "·")
-                    tail = f" {err[:60]}" if err else ""
-                    print(f"    {status} {dim_key:18} ({elapsed:5.1f}s){tail}")
-                    completed_count += 1
-                    if completed_count % INCREMENTAL_SAVE_EVERY == 0:
-                        _persist_progress()
-                except _FutureTimeout:
-                    # 单 fetcher 超时 — 标记为超时维度，不影响其他 fetcher
-                    dims[dim_key_pending] = {
-                        "data": {},
-                        "_timeout": True,
-                        "fallback": True,
-                        "error": f"fetcher timeout > {fetcher_timeout}s",
-                        "source": "timeout"
-                    }
-                    print(f"    ⏱  {dim_key_pending:18} (>{fetcher_timeout}s · TIMEOUT · agent 可补抓)")
-                except Exception as e:
-                    dims[dim_key_pending] = {
-                        "data": {},
-                        "fallback": True,
-                        "error": f"{type(e).__name__}: {str(e)[:120]}",
-                        "source": "crash"
-                    }
-                    print(f"    ✗ {dim_key_pending:18} crash: {type(e).__name__}: {str(e)[:60]}")
-        except _FutureTimeout:
-            # 整体 5 分钟超时 — 记录还没完成的 fetcher
-            unfinished = [futures[f] for f in futures if not f.done()]
-            for item in unfinished:
-                _, dim_key_pending, _ = item
-                if dim_key_pending not in dims:
-                    dims[dim_key_pending] = {
-                        "data": {},
-                        "_timeout": True,
-                        "fallback": True,
-                        "error": "wave2 overall timeout > 300s",
-                        "source": "timeout"
-                    }
-            print(f"    ⏱  wave2 整体超时 · 未完成 {len(unfinished)} 个 fetcher 已标记")
+    jobs = [
+        ProcessJob(
+            key=dim_key,
+            target=_fetch_job,
+            args=(mod_name, ticker, dict(dims)),
+            timeout_sec=PER_FETCHER_TIMEOUT_OVERRIDES.get(dim_key, DEFAULT_PER_FETCHER_TIMEOUT),
+            serial_group="mini_racer" if mod_name in _MINI_RACER_FETCHERS else None,
+        )
+        for mod_name, dim_key, _args_fn in others
+    ]
+    for outcome in run_process_jobs(jobs, max_workers=max_workers, overall_timeout=300):
+        dim_key = outcome.key
+        if outcome.timed_out:
+            dims[dim_key] = {
+                "data": {},
+                "_timeout": True,
+                "fallback": True,
+                "error": outcome.error or "fetcher timeout",
+                "source": "timeout",
+            }
+            print(f"    ⏱  {dim_key:18} (TIMEOUT · agent 可补抓)")
+        elif outcome.error:
+            dims[dim_key] = {
+                "data": {},
+                "fallback": True,
+                "error": outcome.error,
+                "source": "crash",
+            }
+            print(f"    ✗ {dim_key:18} crash: {outcome.error[:80]}")
+        else:
+            result = outcome.value
+            dims[dim_key] = result
+            err = result.get("error") if isinstance(result, dict) else None
+            has_data = bool(result.get("data")) if isinstance(result, dict) else False
+            status = "✗" if err else ("✓" if has_data else "·")
+            tail = f" {err[:60]}" if err else ""
+            print(f"    {status} {dim_key:18}{tail}")
+        completed_count += 1
+        if completed_count % INCREMENTAL_SAVE_EVERY == 0:
+            _persist_progress()
     wave2_elapsed = time.time() - wave2_start
     print(f"  [wave 2] done in {wave2_elapsed:.1f}s")
 
@@ -396,50 +403,26 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
     print("  [wave 3] bonus fetchers parallel ...")
     wave3_start = time.time()
 
-    def _fund_holders():
-        try:
-            import fetch_fund_holders
-            # v2.10.1 · 清单 limit 保持 None（全量列出 649 家），慢在 fetch_fund_holders
-            # 内部已改成"头部 top N 算完整 5Y 业绩，其余只列名字"双层策略。
-            # UZI_FUND_STATS_TOP=N 控制几家算完整业绩（默认 20）。
-            # 用户原问题："基金拉全不是直接检索就行了吗" — 对，清单一次 API 就够，
-            # 过去慢是因为每家都跑 5Y NAV 计算，现在只头部跑，其他点 fund_url 看详情。
-            fh = fetch_fund_holders.main(ticker, limit=None)
-            return ("fund_managers", (fh.get("data") or {}).get("fund_managers", []), None)
-        except Exception as e:
-            return ("fund_managers", [], str(e))
-
-    def _similar_stocks():
-        try:
-            import fetch_similar_stocks
-            ss = fetch_similar_stocks.main(ticker, top_n=4)
-            return ("similar_stocks", (ss.get("data") or {}).get("similar_stocks", []), None)
-        except Exception as e:
-            return ("similar_stocks", [], str(e))
-
-    # v2.6 · wave3 同样加 60s timeout per fetcher（fund_holders 默认抓全量，可能慢）
-    from concurrent.futures import TimeoutError as _FutureTimeout
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        wave3_futures = {pool.submit(_fund_holders): "fund_managers", pool.submit(_similar_stocks): "similar_stocks"}
-        try:
-            for fut in as_completed(wave3_futures, timeout=180):
-                key_pending = wave3_futures[fut]
-                try:
-                    key, val, err = fut.result(timeout=120)
-                    raw[key] = val
-                    status = "✗" if err else "✓"
-                    print(f"    {status} {key}: {len(val) if isinstance(val, list) else 'n/a'}")
-                except _FutureTimeout:
-                    raw[key_pending] = []
-                    print(f"    ⏱  {key_pending} (>120s · TIMEOUT)")
-                except Exception as e:
-                    raw[key_pending] = []
-                    print(f"    ✗ {key_pending} crash: {type(e).__name__}: {str(e)[:60]}")
-        except _FutureTimeout:
-            for f, k in wave3_futures.items():
-                if not f.done() and k not in raw:
-                    raw[k] = []
-            print(f"    ⏱  wave3 overall timeout")
+    # v3.9.x · wave3 也走可 kill 的子进程，避免线程卡死拖住整条 legacy 流程。
+    wave3_jobs = [
+        ProcessJob(key="fund_managers", target=_fund_holders_job, args=(ticker,), timeout_sec=120),
+        ProcessJob(key="similar_stocks", target=_similar_stocks_job, args=(ticker,), timeout_sec=120),
+    ]
+    for outcome in run_process_jobs(wave3_jobs, max_workers=2, overall_timeout=180):
+        if outcome.timed_out:
+            raw[outcome.key] = []
+            print(f"    ⏱  {outcome.key} (TIMEOUT)")
+        elif outcome.error:
+            raw[outcome.key] = []
+            print(f"    ✗ {outcome.key} crash: {outcome.error[:80]}")
+        else:
+            payload = outcome.value or {}
+            val = payload.get("value") or []
+            raw[outcome.key] = val
+            err = payload.get("error")
+            status = "✗" if err else "✓"
+            detail = f" {err[:60]}" if err else ""
+            print(f"    {status} {outcome.key}: {len(val) if isinstance(val, list) else 'n/a'}{detail}")
     wave3_elapsed = time.time() - wave3_start
     print(f"  [wave 3] done in {wave3_elapsed:.1f}s")
 

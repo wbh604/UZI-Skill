@@ -59,7 +59,7 @@ def test_sig_dist_has_skip_key_in_run_real_test():
     assert '"skip"' in line, "BUG regression: run_real_test 的 sig_dist 必须含 'skip' key"
 
 
-# ─── BUG (v2.6) · ThreadPoolExecutor 必须有 timeout ──
+# ─── BUG (v2.6 / #128) · 采集必须有可 kill 的硬超时 ──
 def test_collect_raw_data_has_timeout():
     src = (((SCRIPTS_DIR / "run_real_test.py").read_text(encoding="utf-8")) + "\n" + (SCRIPTS_DIR / "lib" / "pipeline" / "score_fns.py").read_text(encoding="utf-8"))
     fn_idx = src.find("def collect_raw_data")
@@ -69,8 +69,9 @@ def test_collect_raw_data_has_timeout():
     if fn_end < 0:
         fn_end = fn_idx + 10000
     snippet = src[fn_idx:fn_end]
-    assert "as_completed(futures, timeout=" in snippet, "BUG regression: as_completed 必须带 timeout"
-    assert ".result(timeout=" in snippet, "BUG regression: future.result() 必须带 timeout"
+    assert "run_process_jobs(" in snippet, "BUG regression: legacy 采集必须使用可 kill 的子进程"
+    assert "overall_timeout=300" in snippet, "BUG regression: legacy wave2 必须带整体超时"
+    assert "ThreadPoolExecutor" not in snippet, "BUG regression: legacy 采集不能用不可取消的线程池"
 
 
 # ─── BUG (v2.6) · mini_racer 锁必须存在 ──
