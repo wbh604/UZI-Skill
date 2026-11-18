@@ -154,6 +154,24 @@ def test_bcg_question_mark_for_high_growth_small_share():
     assert "Question" in bcg or "问号" in bcg, f"高增长+低份额应归 Question Mark，got {bcg}"
 
 
+def test_competitive_analysis_handles_null_moat_scores():
+    """14_moat.scores=null 是合法缺口，不应触发 AttributeError."""
+    from lib import deep_analysis_methods
+    raw = {
+        "dimensions": {
+            "14_moat": {
+                "data": {
+                    "scores": None,
+                    "scores_available": False,
+                    "scores_note": "未评估：四个护城河维度均未检索到有效证据。",
+                }
+            }
+        }
+    }
+    result = deep_analysis_methods.build_competitive_analysis({}, raw)
+    assert result
+
+
 # ─── Bug 1 · fetch_peers Tier 4 保底 ───────────────────────────────
 
 def test_fetch_peers_has_self_only_fallback():

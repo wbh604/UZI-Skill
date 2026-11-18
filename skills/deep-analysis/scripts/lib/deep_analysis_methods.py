@@ -476,7 +476,7 @@ def build_competitive_analysis(features: dict, raw_data: dict) -> dict:
     industry = (dims.get("7_industry") or {}).get("data") or {}
     peers = (dims.get("4_peers") or {}).get("data") or {}
 
-    moat_scores = moat.get("scores", {}) if isinstance(moat, dict) else {}
+    moat_scores = (moat.get("scores") or {}) if isinstance(moat, dict) else {}
 
     # Porter 5 Forces — 1-5 scale (1 = low threat / 5 = high threat)
     # Lower threat = better for incumbent
