@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import operator
 import time
+import multiprocessing as mp
+import pytest
 
 
 def _timed_sleep(duration):
@@ -48,3 +50,29 @@ def test_process_jobs_serialize_members_of_same_group():
     intervals = {item.key: item.value for item in outcomes}
     assert intervals["mini-b"][0] >= intervals["mini-a"][1]
     assert elapsed < 15.0
+
+
+def test_outcome_callback_runs_before_next_job_finishes():
+    from lib.pipeline.process_runner import ProcessJob, run_process_jobs
+    observed = []
+    def record(outcome):
+        observed.append((outcome.key, time.monotonic()))
+    outcomes = run_process_jobs([
+        ProcessJob(key="first", target=operator.add, args=(2, 3), timeout_sec=5),
+        ProcessJob(key="second", target=_timed_sleep, args=(0.1,), timeout_sec=5),
+    ], max_workers=1, overall_timeout=15, on_outcome=record)
+    assert [key for key, _ in observed] == ["first", "second"]
+    assert observed[0][1] < outcomes[1].value[0]
+
+
+def test_callback_failure_terminates_remaining_children():
+    from lib.pipeline.process_runner import ProcessJob, run_process_jobs
+    before = {p.pid for p in mp.active_children()}
+    def interrupted(outcome):
+        raise RuntimeError("interrupted persistence")
+    with pytest.raises(RuntimeError, match="interrupted persistence"):
+        run_process_jobs([
+            ProcessJob(key="first", target=operator.add, args=(1, 2), timeout_sec=5),
+            ProcessJob(key="stuck", target=time.sleep, args=(30,), timeout_sec=20),
+        ], max_workers=2, overall_timeout=25, on_outcome=interrupted)
+    assert {p.pid for p in mp.active_children()} <= before

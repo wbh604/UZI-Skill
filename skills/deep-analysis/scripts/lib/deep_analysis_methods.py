@@ -7,6 +7,7 @@ All as pure-python computational modules returning structured dicts.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from lib.stock_features import sanitize_features
@@ -473,23 +474,30 @@ def build_competitive_analysis(features: dict, raw_data: dict) -> dict:
     """Structured Porter 5 Forces + BCG position from raw data."""
     dims = raw_data.get("dimensions", {}) or {}
     moat = (dims.get("14_moat") or {}).get("data") or {}
-    industry = (dims.get("7_industry") or {}).get("data") or {}
-    peers = (dims.get("4_peers") or {}).get("data") or {}
-
-    moat_scores = moat.get("scores", {}) if isinstance(moat, dict) else {}
+    moat_keys = ("intangible", "switching", "scale")
+    moat_scores = moat.get("scores") if isinstance(moat, dict) else None
+    moat_scores = moat_scores if isinstance(moat_scores, dict) else {}
+    moat_evidence = moat.get("scores_evidence") if isinstance(moat, dict) else None
+    moat_values = [_num(moat_scores.get(key), float("nan")) for key in moat_keys]
+    moat_available = (
+        isinstance(moat, dict)
+        and moat.get("scores_available") is not False
+        and (moat_evidence is None or (
+            isinstance(moat_evidence, dict) and all(moat_evidence.get(key) is True for key in moat_keys)
+        ))
+        and all(math.isfinite(value) and 0 <= value <= 10 for value in moat_values)
+    )
 
     # Porter 5 Forces — 1-5 scale (1 = low threat / 5 = high threat)
     # Lower threat = better for incumbent
-    barriers = _num(moat_scores.get("intangible", 5))  # 1-10 scale
-    switching = _num(moat_scores.get("switching", 5))
-    scale = _num(moat_scores.get("scale", 5))
+    barriers, switching, scale = moat_values if moat_available else (5, 5, 5)
 
     # Invert moat scores to threat scores (high moat = low threat)
-    new_entrants_threat = max(1, 6 - int(barriers / 2))  # 1-5
-    substitutes_threat = max(1, 6 - int(switching / 2))
+    new_entrants_threat = min(5, max(1, 6 - int(barriers / 2)))  # 1-5
+    substitutes_threat = min(5, max(1, 6 - int(switching / 2)))
     supplier_power = 3  # medium default
     buyer_power = 3
-    rivalry = max(1, 6 - int(scale / 2))
+    rivalry = min(5, max(1, 6 - int(scale / 2)))
 
     total_threat = new_entrants_threat + substitutes_threat + supplier_power + buyer_power + rivalry
     attractiveness = round((25 - total_threat) / 20 * 100, 0)  # 0-100
@@ -501,7 +509,14 @@ def build_competitive_analysis(features: dict, raw_data: dict) -> dict:
     market_share = _num(features.get("market_share", 0))    # % 真实计算
     market_growth = _num(features.get("industry_growth", 0))  # % 真实计算
 
-    if market_share > 3 and market_growth > 15:
+    bcg_available = all(
+        math.isfinite(_num(features.get(key), float("nan")))
+        for key in ("market_share", "industry_growth")
+    )
+    if not bcg_available:
+        bcg = "未评估"
+        bcg_action = "市场份额或行业增速缺失，暂不判断"
+    elif market_share > 3 and market_growth > 15:
         bcg = "Star (明星)"
         bcg_action = "继续投入，抢占市场"
     elif market_share > 3:
@@ -516,22 +531,24 @@ def build_competitive_analysis(features: dict, raw_data: dict) -> dict:
 
     return {
         "method": "Competitive Analysis (Porter + BCG)",
+        "data_quality": "available" if moat_available and bcg_available else "partial" if moat_available or bcg_available else "unavailable",
+        "porter_note": "基于护城河评分估算；供应商与买方力量为中性假设" if moat_available else "护城河有效评分不足，Porter 五力与行业吸引力暂不评估",
         "porter_five_forces": {
             "new_entrants_threat": {"score": new_entrants_threat, "rationale": f"进入壁垒分 {barriers:.0f}/10 (无形资产)"},
             "substitutes_threat": {"score": substitutes_threat, "rationale": f"转换成本分 {switching:.0f}/10"},
             "supplier_power": {"score": supplier_power, "rationale": "中性（未细分）"},
             "buyer_power": {"score": buyer_power, "rationale": "中性（未细分）"},
             "rivalry_intensity": {"score": rivalry, "rationale": f"规模优势分 {scale:.0f}/10"},
-        },
-        "industry_attractiveness_pct": attractiveness,
+        } if moat_available else {},
+        "industry_attractiveness_pct": attractiveness if moat_available else None,
         "bcg_position": {
             "category": bcg,
-            "market_share_pct": market_share,
-            "market_growth_pct": market_growth,
+            "market_share_pct": market_share if bcg_available else None,
+            "market_growth_pct": market_growth if bcg_available else None,
             "strategic_action": bcg_action,
         },
         "methodology_log": [
-            f"Step 1 · Porter 5 力合计威胁分 {total_threat}/25，行业吸引力 {attractiveness}%",
+            f"Step 1 · Porter 5 力合计威胁分 {total_threat}/25，行业吸引力 {attractiveness}%" if moat_available else "Step 1 · 护城河有效评分不足，Porter 五力未评估",
             f"Step 2 · BCG 定位 {bcg} — {bcg_action}",
         ],
     }

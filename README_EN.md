@@ -26,7 +26,7 @@ Scan the mini-program code below with WeChat to view the skill details. Click th
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-22-red)]()
 [![Tests](https://img.shields.io/badge/Offline%20tests-990%20passed-brightgreen)](skills/deep-analysis/scripts/tests)
 
-**A-share / HK / US deep-analysis engine — with first-class Chinese-market coverage Western terminals don't touch. 66 investors × 9 schools × 22 dimensions × 22 institutional methods. Main updated 2026-11-05: industry fund-flow rotation research. Core analysis uses public sources; the optional rotation tool requires a user-supplied local CSV. Manifest version: v3.9.4.**
+**A-share / HK / US deep-analysis engine. 66 investor perspectives × 9 schools × 22 dimensions × 22 institutional methods. Main maintenance on 2026-11-18 fixes legacy fetch timeouts and missing competitive evidence, and adds system browser reuse. The optional rotation tool requires a user-supplied local CSV. Manifest version: v3.9.4.**
 
 [Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-66-investor-jury) · [Methods](#-22-institutional-methods) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq) · [QQ Group](#qq-group)
 
@@ -42,6 +42,7 @@ These maintenance updates are on `main`; they do not represent a new version tag
 
 | Version / Track | Date | Changes |
 | --- | --- | --- |
+| **main maintenance** | **2026-11-18** | Adopt the timeout and null-moat fixes from PR #129 and browser reuse from PR #123. Preserve incremental collection and the materials input to futures analysis. Mark missing competitive evidence as unavailable; correct macOS browser paths and validate explicit overrides. **1027 offline tests passed.** [Review record](docs/maintenance-2026-11-18.md). |
 | **main maintenance** | **2026-11-05** | Add isolated `rotate.py`: CITIC 40-industry active-flow factors, W20–24 rankings, weekly model targets, JSON/CSV/HTML, and separately imported Shenwan proxy observations. Authorized input data is not bundled; no automatic trading or performance claims. [Method and data contract](docs/industry-rotation.md). |
 | **main maintenance** | **2026-10-18** | Preserve real zero/loss values while unknown evidence and placeholder rules abstain. Use actual returned holdings quarters, normalize fund identities and percentage weights, reject stale/invalid samples, and display report-period coverage. Added 56 regressions; **948 passed, 1 skipped**. [Commit b49bccd](https://github.com/wbh604/UZI-Skill/commit/b49bccdd84c385a491a2001d2297ad256b10b0d7), [details](docs/maintenance-2026-10-17.md). |
 | **main maintenance** | **2026-10-16** | Integrate PRs #114–#117 and #119–#122: scan budgets, profile-aware caches, issuer checks, LHB evidence, model gates, abstention and consensus recalculation; fix valuation percentiles and the macOS hook. **892 passed, 1 skipped**. [Commit 2c5505d](https://github.com/wbh604/UZI-Skill/commit/2c5505d9d30363379ce708f85cac93f86b2788cf), [details](docs/maintenance-2026-10-16.md). |

@@ -428,7 +428,7 @@ def _render_competitive_analysis(dim22: dict) -> str:
     bcg = ca.get("bcg_position") or {}
     attr = _number(ca.get("industry_attractiveness_pct"))
 
-    if not porter: return ""
+    if not porter and not ca.get("porter_note"): return ""
 
     # Porter radar via existing svg_radar
     force_labels = ["新进入者", "替代品", "供应商", "买方", "现有竞争"]
@@ -439,7 +439,10 @@ def _render_competitive_analysis(dim22: dict) -> str:
         _number(porter.get("buyer_power", {}).get("score"), 3),
         _number(porter.get("rivalry_intensity", {}).get("score"), 3),
     ]
-    radar = svg_radar(force_labels, force_values, max_val=5, size=200)
+    radar = svg_radar(force_labels, force_values, max_val=5, size=200) if porter else ""
+    if ca.get("porter_note"):
+        radar += f'<p style="font-size:12px;color:#6b7280">{ca["porter_note"]}</p>'
+    attr_label = f"{attr}%" if ca.get("industry_attractiveness_pct") is not None else "未评估"
 
     bcg_cat = bcg.get("category", "—")
     bcg_color = {"Star (明星)": "#10b981", "Cash Cow (现金牛)": "#06b6d4", "Question Mark (问号)": "#f59e0b", "Dog (瘦狗)": "#9ca3af"}.get(bcg_cat, "#9ca3af")
@@ -451,7 +454,7 @@ def _render_competitive_analysis(dim22: dict) -> str:
           <span style="background:#7c3aed;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:1px">COMPETITIVE</span>
           <span style="margin-left:12px;font-size:14px;color:#6b7280">Porter 5 Forces + BCG Matrix</span>
         </div>
-        <div style="font-size:12px;color:#6b7280">行业吸引力 <strong style="color:#111">{attr}%</strong></div>
+        <div style="font-size:12px;color:#6b7280">行业吸引力 <strong style="color:#111">{attr_label}</strong></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center">
         <div style="text-align:center">{radar}</div>

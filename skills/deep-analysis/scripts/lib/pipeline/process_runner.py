@@ -52,6 +52,7 @@ def run_process_jobs(
     *,
     max_workers: int,
     overall_timeout: float,
+    on_outcome: Callable[[ProcessOutcome], None] | None = None,
 ) -> list[ProcessOutcome]:
     """Run picklable callables in child processes that can be terminated."""
     if max_workers < 1:
@@ -67,6 +68,11 @@ def run_process_jobs(
     active: dict[str, tuple[ProcessJob, Any, Any, float]] = {}
     outcomes: list[ProcessOutcome] = []
     started = time.monotonic()
+
+    def record(outcome: ProcessOutcome) -> None:
+        outcomes.append(outcome)
+        if on_outcome is not None:
+            on_outcome(outcome)
 
     def launch_available() -> None:
         active_groups = {
@@ -107,11 +113,9 @@ def run_process_jobs(
                 for key, (_job, process, conn, _job_started) in list(active.items()):
                     _terminate(process)
                     conn.close()
-                    outcomes.append(ProcessOutcome(key=key, error="overall timeout", timed_out=True))
-                outcomes.extend(
-                    ProcessOutcome(key=job.key, error="overall timeout before start", timed_out=True)
-                    for job in pending
-                )
+                    record(ProcessOutcome(key=key, error="overall timeout", timed_out=True))
+                for job in pending:
+                    record(ProcessOutcome(key=job.key, error="overall timeout before start", timed_out=True))
                 active.clear()
                 pending.clear()
                 break
@@ -135,7 +139,7 @@ def run_process_jobs(
                     process.join(timeout=1.0)
                     if process.is_alive():
                         _terminate(process)
-                outcomes.append(ProcessOutcome(key=job.key, value=value if ok else None, error=error))
+                record(ProcessOutcome(key=job.key, value=value if ok else None, error=error))
 
             now = time.monotonic()
             for key, (job, process, conn, job_started) in list(active.items()):
@@ -143,7 +147,7 @@ def run_process_jobs(
                     _terminate(process)
                     conn.close()
                     active.pop(key)
-                    outcomes.append(
+                    record(
                         ProcessOutcome(
                             key=key,
                             error=f"fetcher timeout > {job.timeout_sec:g}s",

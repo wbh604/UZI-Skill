@@ -26,6 +26,8 @@ import sys
 import time
 from pathlib import Path
 
+from lib.browser_locator import browser_launch_kwargs
+
 PROFILE_DIR = Path.home() / ".uzi-skill" / "playwright-xueqiu"
 COOKIE_FILE = PROFILE_DIR / "cookies.json"
 LOGIN_URL = "https://xueqiu.com/"
@@ -89,6 +91,7 @@ def _interactive_login() -> bool:
             headless=False,
             viewport={"width": 1280, "height": 900},
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            **browser_launch_kwargs(),
         )
         page = browser_ctx.new_page()
         page.goto(LOGIN_URL)
@@ -137,6 +140,7 @@ def fetch_with_browser(url: str, timeout: int = 15) -> str | None:
                 user_data_dir=str(PROFILE_DIR / "chromium-profile"),
                 headless=True,
                 user_agent="Mozilla/5.0 Chrome/124",
+                **browser_launch_kwargs(),
             )
             page = ctx.new_page()
             response = page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
