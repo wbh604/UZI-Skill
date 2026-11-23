@@ -26,7 +26,7 @@ Scan the mini-program code below with WeChat to view the skill details. Click th
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-22-red)]()
 [![Tests](https://github.com/wbh604/UZI-Skill/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/wbh604/UZI-Skill/actions/workflows/tests.yml)
 
-**A-share / HK / US deep-analysis engine. 66 investor perspectives × 9 schools × 22 dimensions × 22 institutional methods. Main maintenance on 2026-11-18 fixes legacy fetch timeouts and missing competitive evidence, and adds system browser reuse. The optional rotation tool requires a user-supplied local CSV. Manifest version: v3.9.4.**
+**A-share / HK / US deep-analysis engine. 66 investor perspectives × 9 schools × 22 dimensions × 22 institutional methods. Main maintenance on 2026-11-24 prevents invalid price bars from contaminating caches, indicators and reports. The optional rotation tool requires a user-supplied local CSV. Manifest version: v3.9.4.**
 
 [Install](#install) · [Usage](#usage) · [Why Western Investors Should Care](#-why-western-investors-should-care) · [Jury Panel](#-66-investor-jury) · [Methods](#-22-institutional-methods) · [Screenshots](#-what-the-report-looks-like) · [FAQ](#-faq) · [QQ Group](#qq-group)
 
@@ -42,6 +42,7 @@ These maintenance updates are on `main`; they do not represent a new version tag
 
 | Version / Track | Date | Changes |
 | --- | --- | --- |
+| **main maintenance** | **2026-11-24** | Validate OHLC bars on cache reads and writes, try another source if no valid bars remain, keep missing volume distinct from zero, and reject invalid cached indicator snapshots. No manual cache deletion required. |
 | **main maintenance** | **2026-11-18** | Add a tested [Japanese guide](README_JA.md) and a labeled Sina large-order observation when Eastmoney history is unavailable. Keep the providers separate and exclude Sina observations from scoring. [Data-source verification](docs/capital-flow-sources.md). |
 | **main maintenance** | **2026-11-18** | Adopt the timeout and null-moat fixes from PR #129 and browser reuse from PR #123. Preserve incremental collection and the materials input to futures analysis. Mark missing competitive evidence as unavailable; correct macOS browser paths and validate explicit overrides. **1027 offline tests passed.** [Review record](docs/maintenance-2026-11-18.md). |
 | **main maintenance** | **2026-11-05** | Add isolated `rotate.py`: CITIC 40-industry active-flow factors, W20–24 rankings, weekly model targets, JSON/CSV/HTML, and separately imported Shenwan proxy observations. Authorized input data is not bundled; no automatic trading or performance claims. [Method and data contract](docs/industry-rotation.md). |

@@ -276,6 +276,10 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
                 return False
         if not isinstance(d, dict):
             return False
+        if dim_key == "2_kline":
+            from lib.kline_quality import usable_kline_snapshot
+            if not usable_kline_snapshot(d.get("data")):
+                return False
         return bool(d.get("data")) and not d.get("_timeout") and not d.get("error")
 
     # ── Wave 1: fetch_basic (串行, 后续 fetcher 依赖它拿 industry) ──

@@ -167,7 +167,7 @@ def test_kline_us_chain_falls_through_to_yahoo_v8(monkeypatch):
 
     def fake_v8(sym, range_="2y"):
         called["v8"] += 1
-        return [{"日期": "2026-04-19", "收盘": 100}]
+        return [{"日期": "2026-04-17", "开盘": 99, "最高": 102, "最低": 98, "收盘": 100}]
 
     monkeypatch.setattr(ds, "_yahoo_v8_chart", fake_v8)
     # force yf / ak to fail

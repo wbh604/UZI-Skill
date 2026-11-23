@@ -235,6 +235,10 @@ def collect(ticker: Any, raw_previous: dict | None = None, max_workers: int = 6)
             out[dim_key] = DimResult.empty(dim_key).to_dict()
             continue
         cached = raw_previous.get("dimensions", {}).get(dim_key)
+        if dim_key == "2_kline" and isinstance(cached, dict):
+            from ..kline_quality import usable_kline_snapshot
+            if not usable_kline_snapshot(cached.get("data")):
+                cached = None
         if cached and _is_resume_valid(cached, ttl_sec=_cache_ttl(fetcher)):
             out[dim_key] = cached
             continue

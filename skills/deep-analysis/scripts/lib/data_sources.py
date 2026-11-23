@@ -23,6 +23,7 @@ from .cache import (
     TTL_STATIC,
 )
 from .market_router import Market, TickerInfo, parse_ticker
+from .kline_quality import clean_kline_rows
 
 try:
     import akshare as ak
@@ -895,7 +896,20 @@ def _fetch_basic_us(ti: TickerInfo) -> dict:
 def fetch_kline(ti: TickerInfo, period: str = "daily", start: str = "20240101", adjust: str = "qfq") -> list[dict]:
     """K-line OHLCV. TTL = 5min during day, naturally serves stale-OK after close."""
     key = f"kline__{ti.code}__{period}__{start}__{adjust}"
-    return cached(ti.full, key, lambda: _fetch_kline_impl(ti, period, start, adjust), ttl=TTL_INTRADAY)
+    rows = cached(ti.full, key, lambda: _checked_kline(
+        _fetch_kline_impl(ti, period, start, adjust)), ttl=TTL_INTRADAY)
+    return _checked_kline(rows)
+
+
+def _checked_kline(rows) -> list[dict]:
+    clean = clean_kline_rows(rows)
+    if clean:
+        return clean
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, dict) and row.get("_kline_fetch_error"):
+                return [{"_kline_fetch_error": str(row["_kline_fetch_error"])}]
+    return [{"_kline_fetch_error": "No complete and valid OHLC bars from data sources"}]
 
 
 def _fetch_kline_impl(ti: TickerInfo, period: str, start: str, adjust: str) -> list[dict]:
@@ -925,7 +939,9 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
         try:
             df = _retry(lambda: ak.stock_zh_a_hist(symbol=code, period=period, start_date=start, adjust=adjust), attempts=2)
             if df is not None and len(df) > 0:
-                return df.to_dict("records")
+                rows = clean_kline_rows(df.to_dict("records"))
+                if rows:
+                    return rows
         except Exception as e:
             errors.append(f"akshare-em: {e}")
 
@@ -938,7 +954,9 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
                 # Normalize column names to match em format (中文)
                 rename = {"date": "日期", "open": "开盘", "close": "收盘", "high": "最高", "low": "最低", "volume": "成交量", "amount": "成交额"}
                 df = df.rename(columns=rename)
-                return df.to_dict("records")
+                rows = clean_kline_rows(df.to_dict("records"))
+                if rows:
+                    return rows
         except Exception as e:
             errors.append(f"akshare-sina: {e}")
 
@@ -966,6 +984,7 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
                     "成交量": float(row[5] or 0), "成交额": float(row[6] or 0),
                     "换手率": float(row[7] or 0), "涨跌幅": float(row[8] or 0),
                 })
+            rows = clean_kline_rows(rows)
             if rows:
                 return rows
         except Exception as e:
@@ -993,6 +1012,7 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
                         "最高": float(parts[3]), "最低": float(parts[4]),
                         "成交量": float(parts[5]), "成交额": float(parts[6]),
                     })
+            rows = clean_kline_rows(rows)
             if rows:
                 return rows
         except Exception as e:
@@ -1013,6 +1033,7 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
                     "最低": float(d.get("low", 0)), "收盘": float(d.get("close", 0)),
                     "成交量": float(d.get("volume", 0)),
                 })
+            rows = clean_kline_rows(rows)
             if rows:
                 return rows
         except Exception as e:
@@ -1034,6 +1055,7 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
                         "日期": line[0], "开盘": float(line[1]), "收盘": float(line[2]),
                         "最高": float(line[3]), "最低": float(line[4]), "成交量": float(line[5]),
                     })
+            rows = clean_kline_rows(rows)
             if rows:
                 return rows
         except Exception as e:
@@ -1048,6 +1070,7 @@ def _kline_a_share_chain(ti: TickerInfo, period: str, start: str, adjust: str) -
                 "fetch_kline_a", dim="kline", market="A",
                 code=code, period=period, start=start, adjust=adjust,
             )
+            rows = clean_kline_rows(rows)
             if rows:
                 print(f"    [kline] 所有默认源失败，providers/{src} 救场 ({len(rows)} 根)")
                 return rows
@@ -1077,7 +1100,10 @@ def _kline_hk_chain(ti: TickerInfo, period: str, start: str, adjust: str) -> lis
         try:
             df = _retry(lambda: ak.stock_hk_hist(symbol=code5, period=period, start_date=start, adjust=adjust), attempts=2)
             if df is not None and len(df) > 0:
-                return df.to_dict("records")
+                rows = clean_kline_rows(df.to_dict("records"))
+                if rows:
+                    return rows
+                errors.append("akshare-hk-em: no valid bars")
         except Exception as e:
             errors.append(f"akshare-hk-em: {type(e).__name__}: {str(e)[:80]}")
 
@@ -1096,7 +1122,10 @@ def _kline_hk_chain(ti: TickerInfo, period: str, start: str, adjust: str) -> lis
                         pass
                 rename = {"date": "日期", "open": "开盘", "close": "收盘", "high": "最高", "low": "最低", "volume": "成交量", "amount": "成交额"}
                 df = df.rename(columns=rename)
-                return df.to_dict("records")
+                rows = clean_kline_rows(df.to_dict("records"))
+                if rows:
+                    return rows
+                errors.append("akshare-hk-sina: no valid bars")
         except Exception as e:
             errors.append(f"akshare-hk-sina: {type(e).__name__}: {str(e)[:80]}")
 
@@ -1112,14 +1141,17 @@ def _kline_hk_chain(ti: TickerInfo, period: str, start: str, adjust: str) -> lis
                 # 归一列名到中文
                 rename = {"Date": "日期", "Open": "开盘", "Close": "收盘", "High": "最高", "Low": "最低", "Volume": "成交量"}
                 df = df.rename(columns=rename)
-                return df.to_dict("records")
+                rows = clean_kline_rows(df.to_dict("records"))
+                if rows:
+                    return rows
+                errors.append("yfinance-hk: no valid bars")
         except Exception as e:
             errors.append(f"yfinance-hk: {type(e).__name__}: {str(e)[:80]}")
 
     # ── 4. v2.13.7 · Yahoo Chart v8 HTTP fallback（Grok 验证源 · 零 Key）
     try:
         yf_code = f"{code5.lstrip('0') or '0'}.HK"
-        rows = _yahoo_v8_chart(yf_code, range_="2y")
+        rows = clean_kline_rows(_yahoo_v8_chart(yf_code, range_="2y"))
         if rows:
             return rows
     except Exception as e:
@@ -1171,11 +1203,11 @@ def _yahoo_v8_chart(symbol: str, range_: str = "2y") -> list[dict]:
                 continue
             rows.append({
                 "日期": _dt.fromtimestamp(ts).strftime("%Y-%m-%d"),
-                "开盘": opens[i] if i < len(opens) and opens[i] is not None else closes[i],
+                "开盘": opens[i] if i < len(opens) else None,
                 "收盘": closes[i],
-                "最高": highs[i] if i < len(highs) and highs[i] is not None else closes[i],
-                "最低": lows[i] if i < len(lows) and lows[i] is not None else closes[i],
-                "成交量": vols[i] if i < len(vols) and vols[i] is not None else 0,
+                "最高": highs[i] if i < len(highs) else None,
+                "最低": lows[i] if i < len(lows) else None,
+                "成交量": vols[i] if i < len(vols) else None,
             })
         return rows
     except Exception:
@@ -1192,18 +1224,22 @@ def _kline_us_chain(ti: TickerInfo) -> list[dict]:
             df = _retry(lambda: t.history(period="2y", interval="1d"), attempts=2)
             if df is not None and len(df) > 0:
                 df = df.reset_index()
-                return df.to_dict("records")
+                rows = clean_kline_rows(df.to_dict("records"))
+                if rows:
+                    return rows
         except Exception:
             pass
     if ak:
         try:
             df = ak.stock_us_hist(symbol=symbol, period="daily", start_date="20240101", adjust="qfq")
             if df is not None and len(df) > 0:
-                return df.to_dict("records")
+                rows = clean_kline_rows(df.to_dict("records"))
+                if rows:
+                    return rows
         except Exception:
             pass
     # v2.13.7 · Yahoo Chart v8 HTTP（绕开 yfinance cookie/crumb 机制，更稳）
-    rows = _yahoo_v8_chart(symbol, range_="2y")
+    rows = clean_kline_rows(_yahoo_v8_chart(symbol, range_="2y"))
     if rows:
         return rows
     if requests:

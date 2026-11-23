@@ -15,6 +15,7 @@ from statistics import mean
 
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
+from lib.kline_quality import clean_kline_rows
 from lib.market_router import parse_ticker
 
 
@@ -127,14 +128,13 @@ def _vcp_score(highs: list[float], lows: list[float]) -> float:
 
 
 def compute_indicators(klines: list[dict]) -> dict:
+    klines = clean_kline_rows(klines, require_open=False)
     if not klines:
         return {}
-    closes = [float(r.get("收盘") or r.get("Close") or 0) for r in klines]
-    highs = [float(r.get("最高") or r.get("High") or 0) for r in klines]
-    lows = [float(r.get("最低") or r.get("Low") or 0) for r in klines]
-    vols = [float(r.get("成交量") or r.get("Volume") or 0) for r in klines]
-    if not closes or all(c == 0 for c in closes):
-        return {}
+    closes = [r["收盘"] for r in klines]
+    highs = [r["最高"] for r in klines]
+    lows = [r["最低"] for r in klines]
+    vols = [r["成交量"] for r in klines]
 
     ma5, ma10, ma20, ma60, ma120, ma200 = (_ma(closes, n) for n in (5, 10, 20, 60, 120, 200))
     ema12, ema26 = _ema(closes, 12), _ema(closes, 26)
@@ -143,8 +143,12 @@ def compute_indicators(klines: list[dict]) -> dict:
     macd_hist = [(d - e) * 2 for d, e in zip(dif, dea)]
 
     last = closes[-1]
-    avg_vol_5 = mean(vols[-5:]) if len(vols) >= 5 else 0
-    avg_vol_20 = mean(vols[-20:]) if len(vols) >= 20 else 0
+    vol_ratio = None
+    if len(vols) >= 20 and all(v is not None for v in vols[-20:]):
+        avg_vol_20 = mean(vols[-20:])
+        if avg_vol_20:
+            vol_ratio = mean(vols[-5:]) / avg_vol_20
+    obv, obv_trend = _obv(closes, vols) if all(v is not None for v in vols) else (None, None)
 
     return {
         "last_close": last,
@@ -160,14 +164,14 @@ def compute_indicators(klines: list[dict]) -> dict:
         "kdj_k": _kdj(closes, highs, lows, 9)[0],
         "kdj_d": _kdj(closes, highs, lows, 9)[1],
         "kdj_j": _kdj(closes, highs, lows, 9)[2],
-        "obv": _obv(closes, vols)[0],
-        "obv_trend_up": _obv(closes, vols)[1],
+        "obv": obv,
+        "obv_trend_up": obv_trend,
         "williams_r": _williams_r(closes, highs, lows, 14),
         "year_high": max(closes[-250:]) if len(closes) >= 250 else max(closes),
         "year_low": min(closes[-250:]) if len(closes) >= 250 else min(closes),
         "pct_from_year_high": (last - max(closes[-250:])) / max(closes[-250:]) * 100 if len(closes) >= 250 else 0,
         "stage": _stage(closes, ma200),
-        "vol_5_vs_20": (avg_vol_5 / avg_vol_20) if avg_vol_20 else None,
+        "vol_5_vs_20": vol_ratio,
         "vcp_score": _vcp_score(highs, lows),
     }
 
@@ -199,26 +203,18 @@ STAGE_LABEL = {0: "—", 1: "Stage 1 底部", 2: "Stage 2 上升", 3: "Stage 3 �
 
 def _extract_for_viz(klines: list[dict]) -> dict:
     """Produce the shape the report viz expects: candles_60d / ma20_60d / ma60_60d / kline_stats."""
+    klines = clean_kline_rows(klines)
     if not klines:
         return {}
 
-    def _v(r, *keys, default=0):
-        for k in keys:
-            if k in r and r[k] is not None:
-                try:
-                    return float(r[k])
-                except (ValueError, TypeError):
-                    pass
-        return default
-
-    closes = [_v(r, "收盘", "Close") for r in klines]
-    opens = [_v(r, "开盘", "Open") for r in klines]
-    highs = [_v(r, "最高", "High") for r in klines]
-    lows = [_v(r, "最低", "Low") for r in klines]
+    closes = [r["收盘"] for r in klines]
+    opens = [r["开盘"] for r in klines]
+    highs = [r["最高"] for r in klines]
+    lows = [r["最低"] for r in klines]
 
     dates = []
     for r in klines:
-        d = r.get("日期") or r.get("Date") or ""
+        d = r.get("日期") or r.get("Date") or r.get("date") or r.get("Datetime") or ""
         dates.append(str(d)[:10])
 
     # last 60 candles
@@ -277,7 +273,13 @@ def _extract_for_viz(klines: list[dict]) -> dict:
 
 def main(ticker: str) -> dict:
     ti = parse_ticker(ticker)
-    klines = ds.fetch_kline(ti)
+    rows = ds.fetch_kline(ti)
+    klines = clean_kline_rows(rows)
+    if not klines:
+        error = next((row["_kline_fetch_error"] for row in (rows or [])
+                      if isinstance(row, dict) and row.get("_kline_fetch_error")),
+                     "No valid K-line bars")
+        return {"ticker": ti.full, "data": {}, "source": "kline", "fallback": True, "error": error}
     indicators = compute_indicators(klines)
     chips = fetch_chip_distribution(ti)
     viz_shape = _extract_for_viz(klines)
